@@ -5,7 +5,13 @@ package filesystemsimulator.exceptions;
  */
 public class FileSystemException extends Exception {
 
-	public FileSystemException(String errorMessage) {
-		super(errorMessage);
-	}
+    // Konstruktor yang sudah ada
+    public FileSystemException(String errorMessage) {
+        super(errorMessage);
+    }
+
+    // Konstruktor BARU untuk menerima penyebab (cause)
+    public FileSystemException(String errorMessage, Throwable cause) {
+        super(errorMessage, cause);
+    }
 }

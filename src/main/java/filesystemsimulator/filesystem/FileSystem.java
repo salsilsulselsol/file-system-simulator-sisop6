@@ -1,975 +1,604 @@
 package filesystemsimulator.filesystem;
 
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.RandomAccessFile;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import filesystemsimulator.datastructures.LinkedList;
 import filesystemsimulator.datastructures.StringAppender;
 import filesystemsimulator.exceptions.FileSystemException;
-import filesystemsimulator.filestructures.container.Bitmap;
 import filesystemsimulator.filestructures.container.DataBlock;
 import filesystemsimulator.filestructures.container.IndexNode;
 import filesystemsimulator.filestructures.container.SuperBlock;
 import filesystemsimulator.filestructures.data.DirectoryTree;
 import filesystemsimulator.filestructures.data.FileType;
+import filesystemsimulator.filesystem.core.BlockAllocator;
+import filesystemsimulator.filesystem.core.DataBlockManager;
+import filesystemsimulator.filesystem.core.InodeManager;
+import filesystemsimulator.filesystem.core.PathResolver;
 import filesystemsimulator.utils.ArrayManipulator;
 import filesystemsimulator.utils.StringManipulator;
 
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths; // Import Paths
+
 public class FileSystem {
 
-	public static final byte BYTE_MAX = (byte) 0xff; // 255
+    public static final byte BYTE_MAX = (byte) 0xff; // 255
 
-	RandomAccessFile containerFile;
-	String systemPath;
-	public DirectoryTree tree;
-	SuperBlock superBlock;
-	IndexNode rootNode;
-	IndexNode currentNode;
-	DataBlock currentDataBlock;
-	Bitmap currentInodeBitmapBlock;
-	Bitmap currentDataBitmapBlock;
-	int currentInodeBitmapIndex;
-	int currentDataBitmapIndex;
+    private RandomAccessFile containerFile;
+    // private String containerFilePath; // Tidak digunakan secara aktif setelah konstruktor
+    public final DirectoryTree tree;
+    private final SuperBlock superBlock;
 
-	/**
-	 * Constructs a FileSystem object, creating/overriding a file at the given path and creating a container with
-	 * the given size (in bytes) there.
-	 * @param systemPath the path to the file where the container should be created.
-	 * @param size the maximum size in bytes of the file system's data segment (Note, the file system will require more
-	 *             space than just the data segment for the information that it uses to manage the files).
-	 * @throws FileSystemException if an error occurs while initializing the container or the object.
-	 */
-	public FileSystem(String systemPath, long size)
-			throws FileSystemException {
-		this.systemPath = systemPath;
-		currentNode = new IndexNode();
-		currentInodeBitmapBlock = new Bitmap();
-		currentDataBitmapBlock = new Bitmap();
-		currentInodeBitmapIndex = 0;
-		currentDataBitmapIndex = 0;
-		currentDataBlock = new DataBlock();
-		tree = new DirectoryTree("root", 0);
-		try {
-			containerFile = new RandomAccessFile(systemPath, "rw");
-			initialize(size);
-		} catch (IOException e) {
-			throw new FileSystemException(
-					"An i/o error occurred while initializing the file system");
-		}
-	}
+    // Core Modules
+    private final BlockAllocator blockAllocator;
+    private final InodeManager inodeManager;
+    private final DataBlockManager dataBlockManager;
+    private final PathResolver pathResolver;
 
-	/**
-	 * Creates a file with the given name and file type.
-	 * @param name the name of the new file.
-	 * @param type the type of the new file.
-	 * @throws FileSystemException if a file or directory with the same name already exists,
-	 * or if the maximum directory size if reached, or if an i/o error occurs.
-	 */
-	public void makeFile(String name, FileType type)
-			throws FileSystemException {
-		if (tree.fileExists(name) || tree.dirExists(name)) {
-			throw new FileSystemException(
-					"A file/directory with the same name already exists");
-		}
-		try {
-			int newInode = allocateInodeBlock();
-			int parent = tree.getCurrentDir().inodeNumber;
+    public FileSystem(String systemPath, long size) throws FileSystemException {
+        // this.containerFilePath = systemPath;
+        this.superBlock = new SuperBlock();
 
-			if (newInode != -1) {
-				IndexNode resultNode = new IndexNode();
-				resultNode.setName(name);
-				resultNode.setType(type);
-				resultNode.addDirectBlock(parent);
-				writeIndexNode(resultNode, newInode);
+        try {
+            this.containerFile = new RandomAccessFile(systemPath, "rw");
 
-				IndexNode parentNode = new IndexNode();
-				readIndexNode(parentNode, parent);
-				parentNode.addDirectBlock(newInode);
-				writeIndexNode(parentNode, parent);
-			}
-			tree.addChild(name, newInode, type);
-		} catch (IOException e) {
-			throw new FileSystemException(
-					"An i/o error occurred while creating the file");
-		}
-	}
+            this.blockAllocator = new BlockAllocator(containerFile, superBlock);
+            this.inodeManager = new InodeManager(containerFile, superBlock);
+            this.dataBlockManager = new DataBlockManager(containerFile, superBlock, blockAllocator);
 
-	/**
-	 * Deletes the current directory if it's empty.
-	 * @throws FileSystemException if the current directory is not empty, or if an i/o error occurs.
-	 */
-	public void removeDir()
-			throws FileSystemException {
-		try {
-			int currentIndex = tree.getCurrentDir().inodeNumber;
-			readIndexNode(currentNode, currentIndex);
-			if (!currentNode.isEmpty()) {
-				throw new FileSystemException(
-						"The current directory is not empty!");
-			}
-			int parentIndex = currentNode.getParent();
-			removeDirectBlock(parentIndex, currentIndex);
-			freeInodeBlock(currentIndex);
-			tree.removeCurrent();
-		} catch (IOException e) {
-			throw new FileSystemException(
-					"An i/o error occurred while removing the current directory");
-		}
-	}
+            initializeFileSystemStructure(size);
 
-	/**
-	 * Prints a list of the content in the current directory on the screen.
-	 */
-	public void listCurrentDir() {
-		LinkedList<DirectoryTree.Node> nodes =
-				tree.getCurrentDir().childNodes;
-		System.out.print(".. ");
-		nodes.print();
-	}
+            this.tree = new DirectoryTree("root", 0); // Inode 0 untuk root
+            this.pathResolver = new PathResolver(tree);
 
-	/**
-	 * Changes the current directory to the specified one in the given path sequence.
-	 * @param path the path sequence to the target directory.
-	 * @throws FileSystemException if one of the elements in the sequence does not point to an existing directory.
-	 */
-	public void changeDir(String path)
-			throws FileSystemException {
-		if ("/".equals(path)) {
-			tree.goToRoot();
-			return;
-		}
-		if ("..".equals(path)) {
-			goToParentDir();
-			return;
-		}
-		String[] sequence =
-				StringManipulator.split(path, '/');
-		tree.goTo(sequence);
-	}
+            // Sinkronisasi nama root dari tree dengan inode root dari disk
+            IndexNode rootInodeFromDisk = inodeManager.readNode(0);
+            if (!tree.root.name.equals(rootInodeFromDisk.getNameString())) {
+                System.err.println("Warning: DirectoryTree root name ('" + tree.root.name +
+                    "') and Inode 0 name ('" + rootInodeFromDisk.getNameString() +
+                    "') mismatch after init. Synchronizing tree name from disk.");
+                tree.root.name = rootInodeFromDisk.getNameString();
+            }
+            tree.root.inodeNumber = 0; // Pastikan nomor inode root di tree adalah 0
 
-	/**
-	 * Copies the bytes from the source file to the destination file.
-	 * @param sourceName the name of the source file.
-	 * @param destinationName the name of the destination file.
-	 * @throws FileSystemException if the source file doesn't exist or is a directory,
-	 * if the destination file already exists or is a directory, or if an i/o error occurs.
-	 */
-	public void copyFile(String sourceName, String destinationName)
-			throws FileSystemException {
-		validateCopy(sourceName, destinationName);
-		try {
-			makeFile(destinationName, FileType.FILE);
-			int sourceNumber =
-					tree.getChild(sourceName).inodeNumber;
-			int destNumber =
-					tree.getChild(destinationName).inodeNumber;
-			copyFileBlocks(sourceNumber, destNumber);
-		} catch (IOException e) {
-			throw new FileSystemException(
-					"An i/o error occurred while copying the file");
-		}
-	}
+        } catch (IOException e) {
+            throw new FileSystemException("An i/o error occurred while initializing the file system: " + e.getMessage(), e);
+        }
+    }
 
-	/**
-	 * Deletes the file with the given name.
-	 * @param fileName the name of the file to delete.
-	 * @throws FileSystemException if the file doesn't exist or if an i/o error occurs.
-	 */
-	public void deleteFile(String fileName)
-			throws FileSystemException {
-		if (!tree.fileExists(fileName)) {
-			throw new FileSystemException(
-					"The specified file does not exist");
-		}
-		try {
-			int inodeNumber = tree.getChild(fileName).inodeNumber;
-			readIndexNode(currentNode, inodeNumber);
-			for (int i = 1; i < currentNode.getAllocatedBlockCount(); i++) {
-				wipeDataBlock(currentNode.getDirectBlocks()[i]);
-			}
-			removeDirectBlock(tree.getChild(fileName).inodeNumber, inodeNumber);
-			freeInodeBlock(inodeNumber);
-			tree.removeChild(fileName);
-		} catch (IOException e) {
-			throw new FileSystemException(
-					"An i/o error occurred while deleting the file");
-		}
-	}
+    private void initializeFileSystemStructure(long size) throws IOException, FileSystemException {
+        superBlock.initialize(size);
 
-	/**
-	 * Prints the content of the file on the screen.
-	 * @param fileName the name of the file.
-	 * @throws FileSystemException if the file does not exist or is a directory, or if an i/o error occurs.
-	 */
-	public void printFile(String fileName)
-			throws FileSystemException {
-		validatePrint(fileName);
-		try {
-			printBlocks(tree.getChild(fileName).inodeNumber);
-		} catch (IOException e) {
-			throw new FileSystemException(
-					"An i/o error occurred while printing the file");
-		}
-	}
+        containerFile.setLength(0); // Bersihkan file
+        containerFile.setLength((long) superBlock.getTotalBlockCount() * superBlock.getBlockSize());
 
-	/**
-	 * Writes the given bytes to the specified file. If the file already exists, it gets overridden.
-	 * @param fileName the name of the file.
-	 * @param bytes the bytes to be written to the file.
-	 * @throws FileSystemException if the file name points to a directory or if an i/o error occurs.
-	 */
-	public void writeToFile(String fileName, byte[] bytes)
-			throws FileSystemException {
-		validateWrite(fileName);
-		try {
-			makeFile(fileName, FileType.FILE);
-			int inodeNumber = tree.getChild(fileName).inodeNumber;
-			int neededBlocks = calculateNeededBlocks(bytes.length);
-			writeBytesToBlocks(bytes, inodeNumber, neededBlocks);
-		} catch (IOException e) {
-			throw new FileSystemException(
-					"An i/o error occurred while writing to the file");
-		}
-	}
+        containerFile.seek(0);
+        superBlock.write(containerFile);
 
-	/**
-	 * Appends the given bytes at the end of the specified file.
-	 * If the file does not exist, this method calls writeToFile().
-	 * @param fileName the name of the file.
-	 * @param bytes the bytes to be appended to the file.
-	 * @throws FileSystemException if the file name points to a directory or if an i/o error occurs.
-	 */
-	public void appendToFile(String fileName, byte[] bytes)
-			throws FileSystemException {
-		try {
-			if (tree.dirExists(fileName)) {
-				throw new FileSystemException(
-						"The given name points to a directory");
-			}
-			if (!tree.fileExists(fileName)) {
-				writeToFile(fileName, bytes);
-				return;
-			}
-			int inodeNumber = tree.getChild(fileName).inodeNumber;
-			appendBytesToBlocks(bytes, inodeNumber);
-		} catch (IOException e) {
-			throw new FileSystemException(
-					"An i/o error occurred while appending to the file");
-		}
-	}
+        blockAllocator.initializeBitmaps();
+        initializeRootInodeOnDisk();
+    }
 
-	/**
-	 * Imports the file from the given external path to the destination file.
-	 * @param externalPath the path in the external file system to import the file from.
-	 * @param destinationFile the name of the file to copy the external file to.
-	 * @throws FileSystemException if the external file doesn't exist, or if the destination file already exists/is
-	 * a directory, or if an i/o error occurs.
-	 */
-	public void importFile(String externalPath, String destinationFile)
-			throws FileSystemException {
-		validateImport(externalPath, destinationFile);
-		makeFile(destinationFile, FileType.FILE);
-		try {
-			importBlocks(externalPath, destinationFile);
-		} catch (IOException e) {
-			throw new FileSystemException(
-					"An i/o error occurred while importing the file");
-		}
-	}
+    private void initializeRootInodeOnDisk() throws IOException, FileSystemException {
+        int rootInodeNum = blockAllocator.allocateInode();
+        if (rootInodeNum != 0) {
+            throw new FileSystemException("Critical: Failed to allocate inode 0 for root. Allocated: " + rootInodeNum +
+                ". This usually means an issue with bitmap initialization or SuperBlock calculation.");
+        }
 
-	/**
-	 * Exports the given file to the external file system at the given external path.
-	 * @param file the file to be exported.
-	 * @param externalPath the path to the external file to copy the bytes to.
-	 * @throws FileSystemException if the internal file doesn't exist, or if the external file already exists,
-	 * or if an i/o error occurs.
-	 */
-	public void exportFile(String file, String externalPath)
-			throws FileSystemException {
-		validateExport(file, externalPath);
+        IndexNode rootDiskInode = new IndexNode();
+        rootDiskInode.setName("root");
+        rootDiskInode.setType(FileType.DIRECTORY);
+        rootDiskInode.setParentInode(rootInodeNum); // Parent root adalah dirinya sendiri
+        rootDiskInode.setSize(0); // Direktori root awalnya kosong
+        inodeManager.writeNode(rootDiskInode, rootInodeNum);
+    }
 
-		try {
-			exportBlocks(file, externalPath);
-		}
-		catch (IOException e) {
-			throw new FileSystemException(
-					"An i/o error occurred while exporting the file");
-		}
-	}
+    // --- Metode Publik FileSystem ---
 
-	/**
-	 * Marks a block as allocated in the inode bitmap.
-	 *
-	 * @return the number of the block that was allocated.
-	 */
-	public int allocateInodeBlock()
-			throws IOException {
-		int oldIndex = currentInodeBitmapIndex;
-		int inodeBitmapLength =
-				superBlock.getDataBitmapOffset() - superBlock.getInodeBitmapOffset();
+    public String getCurrentPath() {
+        return tree.getPath();
+    }
 
-		for (int i = 0; i < inodeBitmapLength; i++) {
-			readBitmap(
-					currentInodeBitmapBlock,
-					superBlock.getInodeBitmapOffset(), i);
-			int firstFreeBit =
-					currentInodeBitmapBlock.getFirstFreeBit();
-			if (firstFreeBit != -1) {
-				currentInodeBitmapBlock.resetBit(firstFreeBit);
-				writeBitmap(
-						currentInodeBitmapBlock,
-						superBlock.getInodeBitmapOffset(),
-						currentInodeBitmapIndex);
-				return (i * superBlock.getBlockSize()) + firstFreeBit;
-			}
-		}
-		currentInodeBitmapIndex = oldIndex;
-		return -1;
-	}
+    public void changeDir(String pathStr) throws FileSystemException {
+        if (pathStr == null || pathStr.trim().isEmpty()) {
+            throw new FileSystemException("Path cannot be empty for cd.");
+        }
+        if ("/".equals(pathStr)) {
+            tree.goToRoot();
+            return;
+        }
+        if ("..".equals(pathStr)) {
+            tree.goToParent();
+            return;
+        }
 
-	/**
-	 * Marks a block as free in the inode bitmap.
-	 *
-	 * @param inodeBlockNumber the number of the inode block to be freed.
-	 */
-	public void freeInodeBlock(int inodeBlockNumber)
-			throws IOException {
-		int blockToSeek = inodeBlockNumber / 4096;
-		readBitmap(
-				currentInodeBitmapBlock,
-				superBlock.getInodeBitmapOffset(), blockToSeek);
-		currentInodeBitmapBlock.setBit(
-				(blockToSeek * 4096) + inodeBlockNumber);
-		writeBitmap(
-				currentInodeBitmapBlock,
-				superBlock.getInodeBitmapOffset(),
-				currentInodeBitmapIndex);
-	}
+        // Gunakan PathResolver hanya untuk validasi dan mendapatkan node target
+        // Navigasi tree aktual dilakukan oleh tree.goTo() agar path internal tree konsisten
+        PathResolver.PathResolutionResult result = pathResolver.resolve(pathStr, tree.getCurrentDir());
 
-	/**
-	 * Marks a block as allocated in the data bitmap.
-	 *
-	 * @return the number of the block that was allocated.
-	 */
-	public int allocateDataBlock()
-			throws IOException {
-		int oldIndex = currentDataBitmapIndex;
-		int dataBitmapLength =
-				superBlock.getInodeBlockOffset() - superBlock.getDataBitmapOffset();
-		for (int i = 0; i < dataBitmapLength; i++) {
-			readBitmap(
-					currentDataBitmapBlock,
-					superBlock.getDataBitmapOffset(), i);
-			int firstFreeBit =
-					currentDataBitmapBlock.getFirstFreeBit();
-			if (firstFreeBit != -1) {
-				currentDataBitmapBlock.resetBit(firstFreeBit);
-				writeBitmap(
-						currentDataBitmapBlock,
-						superBlock.getDataBitmapOffset(), currentDataBitmapIndex);
-				return (i * superBlock.getBlockSize()) + firstFreeBit;
-			}
-		}
-		currentDataBitmapIndex = oldIndex;
-		return -1;
-	}
+        if (result.exists && result.node != null && result.node.type == FileType.DIRECTORY) {
+            // Untuk mengubah direktori aktual, kita perlu menavigasi tree
+            // Jika path absolut, mulai dari root
+            if (pathStr.startsWith("/")) {
+                tree.goToRoot();
+                if (pathStr.equals("/")) return; // Sudah di root
+                String[] sequence = StringManipulator.split(pathStr.substring(1), '/');
+                tree.goTo(sequence); // goTo akan handle komponen kosong dan navigasi
+            } else {
+                // Jika path relatif, gunakan goTo dari currentDir
+                String[] sequence = StringManipulator.split(pathStr, '/');
+                tree.goTo(sequence);
+            }
+        } else {
+            throw new FileSystemException("Path not found or is not a directory: " + pathStr);
+        }
+    }
 
-	/**
-	 * Marks a block as free in the data bitmap.
-	 *
-	 * @param dataBlockNumber the number of the data block to be freed.
-	 */
-	public void freeDataBlock(int dataBlockNumber)
-			throws IOException {
-		int blockToSeek = dataBlockNumber / 4096;
-		readBitmap(
-				currentDataBitmapBlock,
-				superBlock.getDataBitmapOffset(), blockToSeek);
-		currentDataBitmapBlock.setBit(
-				(blockToSeek * 4096) + dataBlockNumber);
-		writeBitmap(
-				currentDataBitmapBlock,
-				superBlock.getDataBitmapOffset(), currentDataBitmapIndex);
-	}
 
-	/**
-	 * Reads the specified index node from the container into the given IndexNode.
-	 *
-	 * @param node            the destination for the read index node.
-	 * @param indexNodeNumber the number of the index node.
-	 */
-	public void readIndexNode(IndexNode node, int indexNodeNumber)
-			throws IOException {
-		int blockToSeek =
-				superBlock.getInodeBlockOffset() +
-				indexNodeNumber / (superBlock.getBlockSize() / IndexNode.INODE_SIZE);
-		long additional = 0;
-		if (indexNodeNumber % 2 != 0) {
-			additional = 256;
-		}
+    public void makeFile(String name, FileType type) throws FileSystemException {
+        if (name == null || name.trim().isEmpty()) {
+            throw new FileSystemException("File/Directory name cannot be empty.");
+        }
+        if (name.contains("/") || name.contains("\\")) {
+            throw new FileSystemException("File/Directory name cannot contain path separators.");
+        }
+        if (name.equals(".") || name.equals("..")) {
+            throw new FileSystemException("File/Directory name cannot be '.' or '..'.");
+        }
 
-		containerFile.seek(
-				(long) blockToSeek * superBlock.getBlockSize() + additional);
-		node.read(containerFile);
-	}
 
-	/**
-	 * Writes the specified index node to the container.
-	 *
-	 * @param node            the index node to be written to the file.
-	 * @param indexNodeNumber the number of the index node.
-	 */
-	public void writeIndexNode(IndexNode node, int indexNodeNumber)
-			throws IOException {
-		int blockToSeek =
-				superBlock.getInodeBlockOffset() +
-				indexNodeNumber / (superBlock.getBlockSize() / IndexNode.INODE_SIZE);
-		long additional = 0;
-		if (indexNodeNumber % 2 != 0) {
-			additional = 256;
-		}
+        if (tree.fileExists(name) || tree.dirExists(name)) {
+            throw new FileSystemException("An item named '" + name + "' already exists in " + tree.getCurrentDir().name);
+        }
 
-		containerFile.seek(
-				(long) blockToSeek * superBlock.getBlockSize() + additional);
-		node.write(containerFile);
-	}
+        try {
+            int newInodeNum = blockAllocator.allocateInode();
+            int parentDirInodeNum = tree.getCurrentDir().inodeNumber;
 
-	/**
-	 * Loads the index node with the given number, adds the given block to its list of direct blocks and writes it
-	 * back to the container.
-	 * @param indexNodeNumber the number of the index node.
-	 * @param blockToAdd the direct block to add.
-	 * @throws IOException if an i/o error occurs.
-	 * @throws FileSystemException if the maximum file/directory size is already reached.
-	 */
-	public void addDirectBlock(int indexNodeNumber, int blockToAdd)
-			throws IOException, FileSystemException {
-		readIndexNode(currentNode, indexNodeNumber);
-		currentNode.addDirectBlock(blockToAdd);
-		writeIndexNode(currentNode, indexNodeNumber);
-	}
+            IndexNode newFileInode = new IndexNode();
+            newFileInode.setName(name);
+            newFileInode.setType(type);
+            newFileInode.setParentInode(parentDirInodeNum);
+            if (type == FileType.DIRECTORY) {
+                newFileInode.setSize(0); // Direktori tidak punya ukuran file eksplisit, tapi kita set 0
+            }
+            inodeManager.writeNode(newFileInode, newInodeNum);
 
-	/**
-	 * Loads the index node with the given number, removes the given block from its list of direct blocks and writes it
-	 * back to the container.
-	 *
-	 * @param indexNodeNumber the number of the index node.
-	 * @param blockToRemove   the direct block to remove.
-	 * @throws IOException if an i/o error occurs.
-	 */
-	public void removeDirectBlock(int indexNodeNumber, int blockToRemove)
-			throws IOException {
-		readIndexNode(currentNode, indexNodeNumber);
-		currentNode.removeDirectBlock(blockToRemove);
-		writeIndexNode(currentNode, indexNodeNumber);
-	}
+            IndexNode parentDirInode = inodeManager.readNode(parentDirInodeNum);
+            parentDirInode.addDirectBlock(newInodeNum);
+            inodeManager.writeNode(parentDirInode, parentDirInodeNum);
 
-	/**
-	 * Reads the specified data block from the container into the given DataBlock object.
-	 *
-	 * @param block           the destination for the read data block.
-	 * @param dataBlockNumber the number of the data block.
-	 */
-	public void readDataBlock(DataBlock block, int dataBlockNumber)
-			throws IOException {
-		int blockToSeek =
-				superBlock.getDataBlockOffset() + dataBlockNumber;
-		containerFile.seek(
-				(long) blockToSeek * superBlock.getBlockSize());
-		block.read(containerFile);
-	}
+            tree.addChild(name, newInodeNum, type);
+        } catch (IOException e) {
+            throw new FileSystemException("I/O error creating '" + name + "': " + e.getMessage(), e);
+        }
+    }
 
-	/**
-	 * Writes the specified data block to the container.
-	 * @param block the block to be written to the file.
-	 * @param dataBlockNumber the number of the data block.
-	 * @throws IOException if an i/o error occurs.
-	 */
-	public void writeDataBlock(DataBlock block, int dataBlockNumber)
-			throws IOException {
-		int blockToSeek =
-				superBlock.getDataBlockOffset() + dataBlockNumber;
-		containerFile.seek(
-				(long) blockToSeek * superBlock.getBlockSize());
-		block.write(containerFile);
-	}
+    public void listCurrentDir() {
+        DirectoryTree.Node current = tree.getCurrentDir();
+        System.out.print(current.name + "$ ls: ");
+        if (current != tree.root && current.parent != null) { // Hanya tampilkan .. jika bukan di root
+            System.out.print("..  ");
+        }
+        if (current.childNodes != null) {
+            Object[] children = current.childNodes.toArray();
+            for (Object childObj : children) {
+                DirectoryTree.Node childNode = (DirectoryTree.Node) childObj;
+                System.out.print(childNode.name + (childNode.type == FileType.DIRECTORY ? "/" : "") + "  ");
+            }
+        }
+        System.out.println();
+    }
 
-	public String getSystemPath() {
-		return tree.getPath();
-	}
+    public void removeDir() throws FileSystemException {
+        DirectoryTree.Node dirToRemoveNode = tree.getCurrentDir();
+        if (dirToRemoveNode == tree.root) {
+            throw new FileSystemException("Cannot remove the root directory.");
+        }
 
-	/**
-	 * Reads the specified bitmap from the container into the given Bitmap object.
-	 *
-	 * @param bitmap       the destination for the read bitmap.
-	 * @param offset       the offset for either the inode bitmap or the data bitmap, the corresponding current bitmap index
-	 *                     will be updated accordingly.
-	 * @param bitmapNumber the number of the bitmap.
-	 */
-	private void readBitmap(Bitmap bitmap, int offset, int bitmapNumber)
-			throws IOException {
-		int blockToSeek = offset + bitmapNumber;
-		if (bitmapNumber == superBlock.getInodeBitmapOffset()) {
-			currentInodeBitmapIndex = bitmapNumber;
-		} else {
-			currentDataBitmapIndex = bitmapNumber;
-		}
+        try {
+            IndexNode dirInode = inodeManager.readNode(dirToRemoveNode.inodeNumber);
+            if (!dirInode.isEmpty()) {
+                throw new FileSystemException("Directory '" + dirToRemoveNode.name + "' is not empty.");
+            }
 
-		containerFile.seek(
-				(long) blockToSeek * superBlock.getBlockSize());
-		bitmap.read(containerFile);
-	}
+            int parentOfDirToRemoveInodeNum = dirInode.getParent();
+            IndexNode parentInode = inodeManager.readNode(parentOfDirToRemoveInodeNum);
+            parentInode.removeDirectBlock(dirToRemoveNode.inodeNumber);
+            inodeManager.writeNode(parentInode, parentOfDirToRemoveInodeNum);
 
-	/**
-	 * Writes the specified bitmap to the container.
-	 *
-	 * @param bitmap       the bitmap to be written to the file.
-	 * @param offset       the offset for either the inode bitmap or the data bitmap, the corresponding current bitmap index
-	 *                     will be updated accordingly.
-	 * @param bitmapNumber the number of the bitmap.
-	 */
-	private void writeBitmap(Bitmap bitmap, int offset, int bitmapNumber)
-			throws IOException {
-		int blockToSeek = offset + bitmapNumber;
-		if (bitmapNumber == superBlock.getInodeBitmapOffset()) {
-			currentInodeBitmapIndex = bitmapNumber;
-		} else {
-			currentDataBitmapIndex = bitmapNumber;
-		}
+            blockAllocator.freeInode(dirToRemoveNode.inodeNumber);
+            tree.removeCurrent();
+        } catch (IOException e) {
+            throw new FileSystemException("I/O error removing directory '" + dirToRemoveNode.name + "': " + e.getMessage(), e);
+        }
+    }
 
-		containerFile.seek(
-				(long) blockToSeek * superBlock.getBlockSize());
-		bitmap.write(containerFile);
-	}
+    public void deleteFile(String fileName) throws FileSystemException {
+        DirectoryTree.Node fileNode = tree.getChild(fileName);
+        if (fileNode == null || fileNode.type == FileType.DIRECTORY) {
+            throw new FileSystemException("File '" + fileName + "' not found or is a directory in the current path.");
+        }
+        try {
+            IndexNode fileInode = inodeManager.readNode(fileNode.inodeNumber);
+            for (int dataBlockNum : fileInode.getAllocatedDirectBlocks()) {
+                dataBlockManager.wipeBlock(dataBlockNum);
+            }
 
-	/**
-	 * Initializes the super block of the file system and creates the container.
-	 * @param size the maximum size of the data segment (in bytes).
-	 * @throws IOException if an i/o error occurs.
-	 * @throws FileSystemException if a file system error occurs.
-	 */
-	private void initialize(long size)
-			throws IOException, FileSystemException {
-		superBlock = new SuperBlock();
-		superBlock.initialize(size);
-		createFileSystem();
-	}
+            int parentInodeNum = fileInode.getParent();
+            IndexNode parentInode = inodeManager.readNode(parentInodeNum);
+            parentInode.removeDirectBlock(fileNode.inodeNumber);
+            inodeManager.writeNode(parentInode, parentInodeNum);
 
-	/**
-	 * Overrides the container file, and segments it for a new file system.
-	 * @throws IOException if an i/o error occurs.
-	 * @throws FileSystemException if a file system error occurs.
-	 */
-	private void createFileSystem()
-			throws IOException, FileSystemException {
-		deleteExistingFileContent();
-		containerFile.seek(
-				superBlock.getTotalBlockCount() * 512L);
-		containerFile.writeByte(0);
-		containerFile.seek(0);
-		superBlock.write(containerFile);
-		initializeBitmaps();
-		initializeRootNode();
-	}
+            blockAllocator.freeInode(fileNode.inodeNumber);
+            tree.removeChild(fileName);
+        } catch (IOException e) {
+            throw new FileSystemException("I/O error deleting file '" + fileName + "': " + e.getMessage(), e);
+        }
+    }
 
-	/**
-	 * Deletes the existing content in the container file.
-	 * @throws IOException if an i/o error occurs.
-	 */
-	private void deleteExistingFileContent()
-			throws IOException {
-		new PrintWriter(systemPath).close();
-	}
+    public void writeToFile(String fileName, byte[] bytes) throws FileSystemException {
+        if (tree.dirExists(fileName)) {
+            throw new FileSystemException("Cannot write to '" + fileName + "', it is a directory.");
+        }
+        if (tree.fileExists(fileName)) {
+            deleteFile(fileName);
+        }
 
-	/**
-	 * Initializes the bitmap blocks of the file system and writee them to the container file.
-	 * @throws IOException if an i/o error occurs.
-	 */
-	private void initializeBitmaps()
-			throws IOException {
-		byte[] bitmapBytes = new byte[512];
-		ArrayManipulator.fillArray(bitmapBytes, BYTE_MAX);
-		Bitmap bitmap = new Bitmap(bitmapBytes);
+        makeFile(fileName, FileType.FILE);
+        DirectoryTree.Node fileNode = tree.getChild(fileName);
+        if (fileNode == null) { // Seharusnya tidak terjadi jika makeFile berhasil
+            throw new FileSystemException("Internal error: File node not found after creation for '" + fileName + "'.");
+        }
 
-		containerFile.seek(
-				superBlock.getInodeBitmapOffset() * 512L);
-		long bitmapBlockCount =
-				superBlock.getInodeBlockOffset() - superBlock.getInodeBitmapOffset();
-		for (int i = 0; i < bitmapBlockCount; i++) {
-			bitmap.write(containerFile);
-		}
-	}
+        try {
+            IndexNode fileInode = inodeManager.readNode(fileNode.inodeNumber);
+            int neededDataBlocks = calculateNeededBlocks(bytes.length);
+            int totalBytesWritten = 0;
 
-	/**
-	 * Initializes the root index node and writes it to the container file.
-	 * @throws IOException if an i/o error occurs.
-	 * @throws FileSystemException if a file system error occurs.
-	 */
-	private void initializeRootNode()
-			throws IOException, FileSystemException {
-		rootNode = new IndexNode();
-		rootNode.setName("root");
-		rootNode.addDirectBlock(allocateInodeBlock());
-		containerFile.seek(
-				superBlock.getInodeBlockOffset() * 512L);
-		rootNode.write(containerFile);
-	}
+            for (int i = 0; i < neededDataBlocks; i++) {
+                int start = i * superBlock.getBlockSize();
+                int length = Math.min(superBlock.getBlockSize(), bytes.length - start);
+                byte[] segment = ArrayManipulator.subArray(bytes, start, start + length);
 
-	/**
-	 * Changes the current directory to the parent directory,
-	 * if it exists (if it does not exist, the current dir is root).
-	 */
-	private void goToParentDir() {
-		if (tree.getCurrentDir().parent == null) {
-			return;
-		}
-		tree.goToParent();
-	}
+                int newDataBlockNum = blockAllocator.allocateDataBlock();
+                DataBlock dataBlock = new DataBlock();
+                dataBlock.setBytes(segment);
+                dataBlockManager.writeBlock(dataBlock, newDataBlockNum);
 
-	/**
-	 * Validates the source and destination for a copyFile() call.
-	 * @param src the name of the source file.
-	 * @param dest the name of the destination file.
-	 * @throws FileSystemException if the source file doesn't exist or is a directory, or if the destination file
-	 * already exists or is a directory.
-	 */
-	private void validateCopy(String src, String dest)
-			throws FileSystemException {
-		if (!tree.fileExists(src)) {
-			throw new FileSystemException(
-					"The specified file to copy does not exist or is a directory");
-		}
-		if (tree.fileExists(dest) || tree.dirExists(dest)) {
-			throw new FileSystemException(
-					"A file/directory with the same name as the destination file already exists");
-		}
-	}
+                fileInode.addDirectBlock(newDataBlockNum);
+                totalBytesWritten += length;
+            }
+            fileInode.setSize(totalBytesWritten);
+            inodeManager.writeNode(fileInode, fileNode.inodeNumber);
 
-	/**
-	 * Copies the blocks from the source index node to the destination index node.
-	 * @param sourceNumber the number of the source index node.
-	 * @param destNumber the number of the destination index node.
-	 * @throws IOException if an i/o error occurs.
-	 * @throws FileSystemException if the maximum file size is reached.
-	 */
-	private void copyFileBlocks(int sourceNumber, int destNumber)
-			throws IOException, FileSystemException {
-		IndexNode sourceNode = new IndexNode();
-		IndexNode destinationNode = new IndexNode();
-		readIndexNode(sourceNode, sourceNumber);
-		readIndexNode(destinationNode, destNumber);
+        } catch (IOException e) {
+            try { if (tree.fileExists(fileName)) deleteFile(fileName); } catch (FileSystemException ignored) {}
+            throw new FileSystemException("I/O error writing to file '" + fileName + "': " + e.getMessage(), e);
+        }
+    }
 
-		copyDataBlocks(sourceNode, destinationNode);
-		writeIndexNode(destinationNode, destNumber);
-	}
+    public void appendToFile(String fileName, byte[] bytesToAppend) throws FileSystemException {
+        if (bytesToAppend == null || bytesToAppend.length == 0) return;
 
-	/**
-	 * Copies the direct blocks from one index node to another.
-	 * @param from the index node to copy the blocks from.
-	 * @param to the index node to copy the blocks to.
-	 * @throws IOException if an i/o error occurs.
-	 * @throws FileSystemException if the maximum file size is reached.
-	 */
-	private void copyDataBlocks(IndexNode from, IndexNode to)
-			throws IOException, FileSystemException {
-		for (int i = 1; i < from.getAllocatedBlockCount(); i++) {
-			readDataBlock(
-					currentDataBlock,
-					from.getDirectBlocks()[i]);
-			int allocatedBlock = allocateDataBlock();
-			if (allocatedBlock != -1) {
-				to.addDirectBlock(allocatedBlock);
-				writeDataBlock(currentDataBlock, allocatedBlock);
-			}
-		}
-	}
+        DirectoryTree.Node fileNode = tree.getChild(fileName);
+        if (fileNode == null) {
+            writeToFile(fileName, bytesToAppend); // File tidak ada, buat baru
+            return;
+        }
+        if (fileNode.type == FileType.DIRECTORY) {
+            throw new FileSystemException("Cannot append to '" + fileName + "', it is a directory.");
+        }
 
-	/**
-	 * Deletes the contents of a data block in the container, setting them to the byte value of 0.
-	 * @param dataBlockNumber the number of the data block.
-	 * @throws IOException if an i/o error occurs.
-	 */
-	private void wipeDataBlock(int dataBlockNumber)
-			throws IOException {
-		readDataBlock(
-				currentDataBlock,
-				dataBlockNumber);
-		ArrayManipulator.fillArray(
-				currentDataBlock.getBytes(), (byte) 0);
-		freeDataBlock(dataBlockNumber);
-		writeDataBlock(
-				currentDataBlock,
-				dataBlockNumber);
-	}
+        try {
+            IndexNode fileInode = inodeManager.readNode(fileNode.inodeNumber);
+            int currentFileSize = fileInode.getSize();
+            int bytesAppendedThisOperation = 0;
 
-	/**
-	 * Validates the name of the file for a printFile() call.
-	 * @param fileName the name of the file.
-	 * @throws FileSystemException if the file does not exist or if it's a directory.
-	 */
-	private void validatePrint(String fileName)
-			throws FileSystemException {
-		if (!tree.fileExists(fileName)) {
-			throw new FileSystemException(
-					"The specified file does not exist");
-		}
-		if (tree.getChild(fileName).type == FileType.DIRECTORY) {
-			throw new FileSystemException(
-					"Directories cannot be printed");
-		}
-	}
+            // Handle sisa di blok terakhir yang ada
+            int[] currentDataBlocks = fileInode.getAllocatedDirectBlocks();
+            if (currentDataBlocks.length > 0) {
+                int lastDataBlockNum = currentDataBlocks[currentDataBlocks.length - 1];
+                DataBlock lastBlock = dataBlockManager.readBlock(lastDataBlockNum);
+                int bytesInLastBlock = currentFileSize % superBlock.getBlockSize();
+                if (bytesInLastBlock == 0 && currentFileSize > 0) bytesInLastBlock = superBlock.getBlockSize(); // Blok penuh
 
-	/**
-	 * Prints the content of the data blocks, pointed to by the direct blocks of the given index node.
-	 * @param inodeNumber the number of the index node.
-	 * @throws IOException if an i/o error occurs.
-	 */
-	private void printBlocks(int inodeNumber)
-			throws IOException {
-		DataBlock buffer = new DataBlock();
-		StringAppender result = new StringAppender();
-		readIndexNode(currentNode, inodeNumber);
-		int[] blocks =
-				currentNode.getAllocatedDirectBlocks();
-		for (int block : blocks) {
-			readDataBlock(buffer, block);
-			appendValidChars(
-					result,
-					new String(buffer.getBytes()));
-			System.out.print(result);
-			result = new StringAppender();
-		}
-		System.out.println();
-	}
+                int freeSpaceInLastBlock = superBlock.getBlockSize() - bytesInLastBlock;
+                if (freeSpaceInLastBlock > 0) {
+                    int countToAppendToLast = Math.min(bytesToAppend.length, freeSpaceInLastBlock);
+                    byte[] segmentForLast = ArrayManipulator.subArray(bytesToAppend, 0, countToAppendToLast);
+                    lastBlock.appendBytes(segmentForLast); // Asumsi appendBytes di DataBlock ada
+                    dataBlockManager.writeBlock(lastBlock, lastDataBlockNum);
+                    currentFileSize += countToAppendToLast;
+                    bytesAppendedThisOperation += countToAppendToLast;
+                }
+            }
 
-	/**
-	 * Appends the characters whose value is different from the byte value for 0.
-	 * @param appender the appender to append the characters to.
-	 * @param chars the characters to append.
-	 */
-	private void appendValidChars(StringAppender appender, String chars) {
-		for (int i = 0; i < chars.length(); i++) {
-			if (chars.charAt(i) != (char)(byte)0) {
-				appender.append(
-						String.valueOf(chars.charAt(i)));
-			}
-		}
-	}
+            // Tulis sisa byte (jika ada) ke blok baru
+            if (bytesAppendedThisOperation < bytesToAppend.length) {
+                byte[] remainingBytes = ArrayManipulator.subArray(bytesToAppend, bytesAppendedThisOperation, bytesToAppend.length);
+                int neededNewBlocks = calculateNeededBlocks(remainingBytes.length);
 
-	/**
-	 * Validates the given file name for a writeToFile() call, deleting the content of the file if it already exists.
-	 * @param fileName the name of the file
-	 * @throws FileSystemException if the name points to an existing directory.
-	 */
-	private void validateWrite(String fileName)
-			throws FileSystemException {
-		if (tree.dirExists(fileName)) {
-			throw new FileSystemException(
-					"The given name points to a directory");
-		}
-		if (tree.fileExists(fileName)) {
-			deleteFile(fileName);
-		}
-	}
+                for (int i = 0; i < neededNewBlocks; i++) {
+                    int start = i * superBlock.getBlockSize();
+                    int length = Math.min(superBlock.getBlockSize(), remainingBytes.length - start);
+                    byte[] segment = ArrayManipulator.subArray(remainingBytes, start, start + length);
 
-	/**
-	 * Calculates the needed amount of blocks for the specified amount of bytes.
-	 * @param amountOfBytes the amount of bytes.
-	 * @return the calculated amount of blocks.
-	 */
-	private int calculateNeededBlocks(int amountOfBytes) {
-		return (int) Math.ceil(amountOfBytes / 512f);
-	}
+                    int newDataBlockNum = blockAllocator.allocateDataBlock();
+                    DataBlock newBlock = new DataBlock();
+                    newBlock.setBytes(segment);
+                    dataBlockManager.writeBlock(newBlock, newDataBlockNum);
+                    fileInode.addDirectBlock(newDataBlockNum);
+                    currentFileSize += length;
+                }
+            }
+            fileInode.setSize(currentFileSize);
+            inodeManager.writeNode(fileInode, fileNode.inodeNumber);
 
-	/**
-	 * Calculates the needed amount of blocks for the specified amount of bytes.
-	 * @param amountOfBytes the amount of bytes.
-	 * @return the calculated amount of blocks.
-	 */
-	private int calculateNeededBlocks(long amountOfBytes) {
-		return (int) Math.ceil(amountOfBytes / 512f);
-	}
+        } catch (IOException e) {
+            throw new FileSystemException("I/O error appending to file '" + fileName + "': " + e.getMessage(), e);
+        }
+    }
 
-	/**
-	 * Writes the given bytes to the file at the given index node number.
-	 * @param bytes the bytes to write.
-	 * @param inodeNumber the number of the index node.
-	 * @param neededBlocksCount the amount of needed blocks to write the bytes to.
-	 * @throws IOException if an i/o error occurs.
-	 * @throws FileSystemException if the maximum file size is reached.
-	 */
-	private void writeBytesToBlocks(byte[] bytes, int inodeNumber, int neededBlocksCount)
-			throws IOException, FileSystemException {
-		byte[] buffer;
-		int allocatedBlock;
-		for (int i = 0; i < neededBlocksCount; i++) {
-			int start = i * 512;
-			int end = 512;
-			if (i == neededBlocksCount - 1) {
-				end = bytes.length;
-			}
-			buffer = ArrayManipulator.subArray(bytes, start, end);
-			allocatedBlock = allocateDataBlock();
-			if (allocatedBlock != -1) {
-				addDirectBlock(inodeNumber, allocatedBlock);
-				currentDataBlock = new DataBlock(buffer);
-				writeDataBlock(currentDataBlock, allocatedBlock);
-			}
-		}
-	}
 
-	/**
-	 * Appends the given bytes to the file at the given index node number.
-	 * @param bytes the bytes to append.
-	 * @param inodeNumber the number of the index node.
-	 * @throws IOException if an i/o error occurs.
-	 * @throws FileSystemException if the maximum file size is reached.
-	 */
-	private void appendBytesToBlocks(byte[] bytes, int inodeNumber)
-			throws IOException, FileSystemException {
-		readIndexNode(currentNode, inodeNumber);
-		readDataBlock(
-				currentDataBlock,
-				currentNode.getLastAllocatedBlock());
-		int lastBlockFreeBytes =
-				512 - ArrayManipulator.getElementCount(currentDataBlock.getBytes());
-		int neededBlocks =
-				calculateBlocksAppend(bytes, lastBlockFreeBytes);
-		if (lastBlockFreeBytes != 0) {
-			currentDataBlock.appendBytes(
-					ArrayManipulator.subArray(bytes, 0, lastBlockFreeBytes));
-			writeDataBlock(
-					currentDataBlock,
-					currentNode.getLastAllocatedBlock());
-			bytes = ArrayManipulator.subArray(bytes, lastBlockFreeBytes, bytes.length);
-		}
-		writeBytesToBlocks(bytes, inodeNumber, neededBlocks);
-	}
+    public void printFile(String fileName) throws FileSystemException {
+        DirectoryTree.Node fileNode = tree.getChild(fileName);
+        if (fileNode == null || fileNode.type == FileType.DIRECTORY) {
+            throw new FileSystemException("File '" + fileName + "' not found or is a directory in current path.");
+        }
+        try {
+            IndexNode fileInode = inodeManager.readNode(fileNode.inodeNumber);
+            StringAppender content = new StringAppender();
+            int fileSize = fileInode.getSize();
+            int totalBytesRead = 0;
 
-	/**
-	 * Calculates the amount of needed blocks for the append operation.
-	 * @param bytes the bytes to calculate the needed blocks for.
-	 * @param lastBlockFreeBytes the amount of free bytes in the last block of the file where bytes are written.
-	 * @return the calculated amount of blocks.
-	 */
-	private int calculateBlocksAppend(byte[] bytes, int lastBlockFreeBytes) {
-		int bytesLeft = bytes.length;
-		bytesLeft -= lastBlockFreeBytes;
-		return calculateNeededBlocks(bytesLeft);
-	}
+            for (int dataBlockNum : fileInode.getAllocatedDirectBlocks()) {
+                if (totalBytesRead >= fileSize) break;
+                DataBlock dataBlock = dataBlockManager.readBlock(dataBlockNum);
+                int bytesToReadFromThisBlock = Math.min(superBlock.getBlockSize(), fileSize - totalBytesRead);
 
-	/**
-	 * Validates the external path and the destination file for an importFile() call.
-	 * @param extPath the path to the external file.
-	 * @param destFile the name of the file to import the bytes to.
-	 * @throws FileSystemException if the external file doesn't exist
-	 * or if the destination file already exists or is a directory.
-	 */
-	private void validateImport(String extPath, String destFile)
-			throws FileSystemException {
-		if (Files.notExists(Path.of(extPath))) {
-			throw new FileSystemException(
-					"The external file does not exist");
-		}
-		if (tree.fileExists(destFile) || tree.dirExists(destFile)) {
-			throw new FileSystemException(
-					"A file/directory with the same name as the destination file already exists");
-		}
-	}
+                // Buat string hanya dari byte yang relevan
+                byte[] blockBytes = dataBlock.getBytes();
+                byte[] relevantBytes = new byte[bytesToReadFromThisBlock];
+                System.arraycopy(blockBytes, 0, relevantBytes, 0, bytesToReadFromThisBlock);
+                content.append(new String(relevantBytes)); // Encoding default
 
-	/**
-	 * Imports the blocks from the external source file to the destination file.
-	 * @param src the path to the source file in the external file system.
-	 * @param dest the name of the destination file.
-	 * @throws IOException if an i/o error occurs.
-	 * @throws FileSystemException if the maximum file size is reached.
-	 */
-	private void importBlocks(String src, String dest)
-			throws IOException, FileSystemException {
-		try (RandomAccessFile srcFile = new RandomAccessFile(src, "r")) {
-			long len = srcFile.length();
-			int neededBlocks = calculateNeededBlocks(len);
-			IndexNode destNode = new IndexNode();
-			readIndexNode(
-					destNode,
-					tree.getChild(dest).inodeNumber);
-			importBlocksFromFile(neededBlocks, srcFile, destNode);
-			writeIndexNode(
-					destNode,
-					tree.getChild(dest).inodeNumber);
-		}
-	}
+                totalBytesRead += bytesToReadFromThisBlock;
+            }
+            System.out.print(content.toString());
+            if(totalBytesRead > 0 && !content.toString().endsWith("\n")) System.out.println();
 
-	/**
-	 * Imports the given amount of blocks from the specified file, and adds the numbers of the newly allocated
-	 * data blocks to the direct block list of the index node.
-	 * @param neededBlocksCount the amount of blocks needed to store the external file's bytes.
-	 * @param file the file to read the blocks from.
-	 * @param dest the index node of the file to write the blocks to.
-	 * @throws IOException if an i/o error occurs.
-	 * @throws FileSystemException if the maximum file size is reached.
-	 */
-	private void importBlocksFromFile(int neededBlocksCount, RandomAccessFile file, IndexNode dest)
-			throws IOException, FileSystemException {
-		byte[] buffer = new byte[512];
-		for (int i = 0; i < neededBlocksCount; i++) {
-			if (i == neededBlocksCount - 1) {
-				buffer = new byte[512];
-				file.read(buffer, 0, (int)(file.length() - (i * 512)));
-			} else {
-				file.read(buffer, 0, 512);
-			}
-			int allocatedBlock = allocateDataBlock();
-			if (allocatedBlock != -1) {
-				dest.addDirectBlock(allocatedBlock);
-				DataBlock newBlock = new DataBlock(buffer);
-				writeDataBlock(newBlock, allocatedBlock);
-			}
-		}
-	}
 
-	/**
-	 * Validates the file name and the external path for an exportFile() call.
-	 * @param fileName the name of the file to export.
-	 * @param extPath the path to the external file to export the bytes to.
-	 * @throws FileSystemException if the given file does not exist, or if the external file already exists.
-	 */
-	private void validateExport(String fileName, String extPath)
-			throws FileSystemException {
-		if (!tree.fileExists(fileName)) {
-			throw new FileSystemException(
-					"The specified file does not exist");
-		}
-		if (Files.exists(Path.of(extPath))) {
-			throw new FileSystemException(
-					"The external path points to a file that already exists");
-		}
-	}
+        } catch (IOException e) {
+            throw new FileSystemException("I/O error printing file '" + fileName + "': " + e.getMessage(), e);
+        }
+    }
 
-	/**
-	 * Exports the blocks from the given internal file to the external file, pointed to by the given path.
-	 * @param from the file to copy the blocks from.
-	 * @param to the path to the external file to copy the blocks to.
-	 * @throws IOException if an i/o error occurs.
-	 */
-	private void exportBlocks(String from, String to)
-			throws IOException {
-		try (RandomAccessFile ext = new RandomAccessFile(to, "rw")) {
-			int inodeNumber = tree.getChild(from).inodeNumber;
-			readIndexNode(currentNode, inodeNumber);
-			for (int i = 1; i < currentNode.getAllocatedBlockCount(); i++) {
-				readDataBlock(currentDataBlock, currentNode.getDirectBlocks()[i]);
-				if (i == currentNode.getAllocatedBlockCount() - 1) {
-					ext.write(ArrayManipulator.subArray(
-							currentDataBlock.getBytes(),
-							0,
-							ArrayManipulator.getElementCount(currentDataBlock.getBytes())));
-				} else {
-					ext.write(currentDataBlock.getBytes());
-				}
-			}
-		}
-	}
+    public void copyFile(String sourceName, String destinationName) throws FileSystemException {
+        DirectoryTree.Node sourceNode = tree.getChild(sourceName);
+        if (sourceNode == null || sourceNode.type == FileType.DIRECTORY) {
+            throw new FileSystemException("Source file '" + sourceName + "' not found or is a directory.");
+        }
+        if (tree.fileExists(destinationName) || tree.dirExists(destinationName)) {
+            throw new FileSystemException("Destination '" + destinationName + "' already exists.");
+        }
+
+        makeFile(destinationName, FileType.FILE); // Buat file tujuan kosong
+        DirectoryTree.Node destNode = tree.getChild(destinationName);
+        if (destNode == null) throw new FileSystemException("Failed to create destination file '"+destinationName+"' for copy.");
+
+
+        try {
+            IndexNode sourceInode = inodeManager.readNode(sourceNode.inodeNumber);
+            IndexNode destInode = inodeManager.readNode(destNode.inodeNumber); // Inode tujuan (masih kosong)
+            int totalBytesCopied = 0;
+
+            for (int sourceDataBlockNum : sourceInode.getAllocatedDirectBlocks()) {
+                DataBlock sourceBlockData = dataBlockManager.readBlock(sourceDataBlockNum);
+
+                int newDataBlockNum = blockAllocator.allocateDataBlock();
+                // Salin konten blok data (bukan objeknya, tapi byte-nya)
+                DataBlock destBlockData = new DataBlock();
+                destBlockData.setBytes(sourceBlockData.getBytes()); // Salin byte
+                dataBlockManager.writeBlock(destBlockData, newDataBlockNum);
+
+                destInode.addDirectBlock(newDataBlockNum);
+
+                // Hitung byte yang disalin dari blok ini
+                // Untuk blok terakhir, mungkin tidak penuh
+                if (totalBytesCopied + superBlock.getBlockSize() <= sourceInode.getSize()){
+                    totalBytesCopied += superBlock.getBlockSize();
+                } else {
+                    totalBytesCopied += (sourceInode.getSize() % superBlock.getBlockSize());
+                }
+
+            }
+            destInode.setSize(sourceInode.getSize()); // Set ukuran yang sama
+            inodeManager.writeNode(destInode, destNode.inodeNumber);
+
+        } catch (IOException e) {
+            try { if (tree.fileExists(destinationName)) deleteFile(destinationName); } catch (FileSystemException ignored) {}
+            throw new FileSystemException("I/O error copying file '" + sourceName + "' to '" + destinationName + "': " + e.getMessage(), e);
+        }
+    }
+
+
+    public void moveItem(String sourcePathStr, String destPathStr) throws FileSystemException {
+        PathResolver.PathResolutionResult sourceRes = pathResolver.resolve(sourcePathStr, tree.getCurrentDir());
+
+        if (!sourceRes.exists || sourceRes.node == null) {
+            throw new FileSystemException("Source path not found: " + sourcePathStr);
+        }
+        if (sourceRes.node == tree.root) {
+            throw new FileSystemException("Cannot move the root directory.");
+        }
+
+        DirectoryTree.Node sourceNode = sourceRes.node;
+        DirectoryTree.Node originalParentNodeInTree = sourceRes.parentNode;
+        if (originalParentNodeInTree == null && sourceNode != tree.root) {
+            if (sourceNode.parent == tree.root) originalParentNodeInTree = tree.root;
+            else throw new FileSystemException("Cannot determine original parent for source: " + sourcePathStr);
+        }
+        if (originalParentNodeInTree == null) { // Seharusnya tidak terjadi jika source bukan root
+            throw new FileSystemException("Critical: Original parent node is null for non-root source.");
+        }
+
+
+        PathResolver.PathResolutionResult destRes = pathResolver.resolve(destPathStr, tree.getCurrentDir());
+        DirectoryTree.Node finalDestParentNodeInTree;
+        String newItemName;
+
+        if (destRes.exists && destRes.node != null && destRes.node.type == FileType.DIRECTORY) {
+            finalDestParentNodeInTree = destRes.node;
+            newItemName = sourceNode.name;
+        } else if (destRes.exists && destRes.node != null && destRes.node.type == FileType.FILE) {
+            throw new FileSystemException("Destination path is an existing file, cannot overwrite with move: " + destPathStr);
+        } else {
+            if (destRes.parentNode == null || destRes.parentNode.type != FileType.DIRECTORY) {
+                throw new FileSystemException("Invalid destination parent directory for: " + destPathStr + ". Parent found: " + (destRes.parentNode != null ? destRes.parentNode.name : "null"));
+            }
+            finalDestParentNodeInTree = destRes.parentNode;
+            newItemName = destRes.name;
+            if (newItemName == null || newItemName.trim().isEmpty() || destPathStr.trim().endsWith("/")) {
+                newItemName = sourceNode.name;
+            }
+        }
+
+        if (newItemName.length() >= IndexNode.MAX_NAME_SIZE) {
+            throw new FileSystemException("New name '"+ newItemName +"' is too long (max " + (IndexNode.MAX_NAME_SIZE -1) + " chars).");
+        }
+
+
+        if (finalDestParentNodeInTree.childNodes != null) {
+            for (Object childObj : finalDestParentNodeInTree.childNodes.toArray()) {
+                DirectoryTree.Node child = (DirectoryTree.Node) childObj;
+                if (child.name.equals(newItemName) && child.inodeNumber != sourceNode.inodeNumber) {
+                    throw new FileSystemException("An item named '" + newItemName + "' already exists in '" + finalDestParentNodeInTree.name + "'.");
+                }
+            }
+        }
+
+        if (sourceNode.type == FileType.DIRECTORY) {
+            DirectoryTree.Node tempParent = finalDestParentNodeInTree;
+            while (tempParent != null) {
+                if (tempParent == sourceNode) {
+                    throw new FileSystemException("Cannot move a directory into itself or one of its subdirectories.");
+                }
+                tempParent = tempParent.parent;
+            }
+        }
+
+        try {
+            // Operasi Inode
+            IndexNode originalParentInodeObj = inodeManager.readNode(originalParentNodeInTree.inodeNumber);
+            originalParentInodeObj.removeDirectBlock(sourceNode.inodeNumber);
+            inodeManager.writeNode(originalParentInodeObj, originalParentNodeInTree.inodeNumber);
+
+            IndexNode sourceItemInodeObj = inodeManager.readNode(sourceNode.inodeNumber);
+            sourceItemInodeObj.setParentInode(finalDestParentNodeInTree.inodeNumber);
+            if (!sourceItemInodeObj.getNameString().equals(newItemName)) {
+                sourceItemInodeObj.setName(newItemName);
+            }
+            inodeManager.writeNode(sourceItemInodeObj, sourceNode.inodeNumber);
+
+            if (originalParentNodeInTree.inodeNumber != finalDestParentNodeInTree.inodeNumber) {
+                IndexNode destParentInodeObj = inodeManager.readNode(finalDestParentNodeInTree.inodeNumber);
+                destParentInodeObj.addDirectBlock(sourceNode.inodeNumber);
+                inodeManager.writeNode(destParentInodeObj, finalDestParentNodeInTree.inodeNumber);
+            }
+
+            // Operasi DirectoryTree (setelah operasi inode berhasil)
+            if (originalParentNodeInTree.childNodes != null) {
+                originalParentNodeInTree.childNodes.remove(sourceNode);
+            }
+            sourceNode.parent = finalDestParentNodeInTree;
+            sourceNode.name = newItemName;
+            if (finalDestParentNodeInTree.childNodes == null) {
+                finalDestParentNodeInTree.childNodes = new LinkedList<>();
+            }
+            finalDestParentNodeInTree.childNodes.append(sourceNode);
+
+            System.out.println("LOG: Moved '" + sourcePathStr + "' to '" + destPathStr + "' as '" + newItemName + "'");
+
+        } catch (IOException e) {
+            throw new FileSystemException("I/O error during move operation: " + e.getMessage(), e);
+        }
+    }
+
+    public void importFile(String externalPath, String destinationFileNameInSim) throws FileSystemException {
+        Path extPath = Paths.get(externalPath);
+        if (Files.notExists(extPath)) {
+            throw new FileSystemException("External file does not exist: " + externalPath);
+        }
+        if (tree.fileExists(destinationFileNameInSim) || tree.dirExists(destinationFileNameInSim)) {
+            throw new FileSystemException("Item named '" + destinationFileNameInSim + "' already exists in simulator's current directory.");
+        }
+
+        makeFile(destinationFileNameInSim, FileType.FILE);
+        DirectoryTree.Node destNode = tree.getChild(destinationFileNameInSim);
+        if (destNode == null) throw new FileSystemException("Failed to create destination file '"+destinationFileNameInSim+"' in simulator for import.");
+
+
+        try (RandomAccessFile srcExtFile = new RandomAccessFile(externalPath, "r")) {
+            IndexNode destInode = inodeManager.readNode(destNode.inodeNumber);
+            byte[] buffer = new byte[superBlock.getBlockSize()];
+            int bytesReadFromExt;
+            long totalBytesImported = 0;
+
+            while ((bytesReadFromExt = srcExtFile.read(buffer)) != -1) {
+                int newDataBlockNum = blockAllocator.allocateDataBlock();
+                DataBlock simDataBlock = new DataBlock();
+                if (bytesReadFromExt < buffer.length) {
+                    simDataBlock.setBytes(ArrayManipulator.subArray(buffer, 0, bytesReadFromExt));
+                } else {
+                    simDataBlock.setBytes(buffer);
+                }
+                dataBlockManager.writeBlock(simDataBlock, newDataBlockNum);
+                destInode.addDirectBlock(newDataBlockNum);
+                totalBytesImported += bytesReadFromExt;
+                if (bytesReadFromExt < buffer.length) break;
+            }
+            destInode.setSize((int) totalBytesImported);
+            inodeManager.writeNode(destInode, destNode.inodeNumber);
+
+        } catch (IOException e) {
+            try { if (tree.fileExists(destinationFileNameInSim)) deleteFile(destinationFileNameInSim); } catch (FileSystemException ignored) {}
+            throw new FileSystemException("I/O error importing file '" + externalPath + "': " + e.getMessage(), e);
+        }
+    }
+
+    public void exportFile(String fileNameInSim, String externalPath) throws FileSystemException {
+        DirectoryTree.Node sourceNode = tree.getChild(fileNameInSim);
+        if (sourceNode == null || sourceNode.type == FileType.DIRECTORY) {
+            throw new FileSystemException("Simulator file '" + fileNameInSim + "' not found or is a directory.");
+        }
+        Path extPath = Paths.get(externalPath);
+        if (Files.exists(extPath)) {
+            throw new FileSystemException("External file '" + externalPath + "' already exists.");
+        }
+
+        try (RandomAccessFile destExtFile = new RandomAccessFile(externalPath, "rw")) {
+            IndexNode sourceInode = inodeManager.readNode(sourceNode.inodeNumber);
+            int fileSize = sourceInode.getSize();
+            int totalBytesExported = 0;
+
+            for (int simDataBlockNum : sourceInode.getAllocatedDirectBlocks()) {
+                if (totalBytesExported >= fileSize) break;
+                DataBlock simDataBlock = dataBlockManager.readBlock(simDataBlockNum);
+                int bytesToWriteFromBlock = Math.min(superBlock.getBlockSize(), fileSize - totalBytesExported);
+                destExtFile.write(simDataBlock.getBytes(), 0, bytesToWriteFromBlock);
+                totalBytesExported += bytesToWriteFromBlock;
+            }
+        } catch (IOException e) {
+            throw new FileSystemException("I/O error exporting file '" + fileNameInSim + "' to '" + externalPath + "': " + e.getMessage(), e);
+        }
+    }
+
+
+    private int calculateNeededBlocks(int amountOfBytes) {
+        if (amountOfBytes == 0) return 0;
+        return (int) Math.ceil((float) amountOfBytes / superBlock.getBlockSize());
+    }
 }

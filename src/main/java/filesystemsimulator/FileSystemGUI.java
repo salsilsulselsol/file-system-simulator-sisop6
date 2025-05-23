@@ -260,7 +260,7 @@ public class FileSystemGUI extends JFrame {
 
     private void updateCurrentPathLabel() {
         if (fileSystem != null) {
-            currentPathLabel.setText(fileSystem.getSystemPath()); //
+            currentPathLabel.setText(fileSystem.getCurrentPath()); //
         } else {
             currentPathLabel.setText("Not Initialized");
         }
@@ -364,7 +364,7 @@ public class FileSystemGUI extends JFrame {
         fileSystem.listCurrentDir(); //
         System.out.flush();
         System.setOut(oldOut);
-        logMessage("ls output for " + fileSystem.getSystemPath() + ":\n" + baos.toString().trim());
+        logMessage("ls output for " + fileSystem.getCurrentPath() + ":\n" + baos.toString().trim());
         updateDirectoryTreeDisplay(); // Mungkin tidak perlu jika ls tidak mengubah state tree
     }
 
@@ -373,7 +373,7 @@ public class FileSystemGUI extends JFrame {
         if (path != null && !path.trim().isEmpty()) {
             try {
                 fileSystem.changeDir(path); //
-                logMessage("Changed directory to: " + fileSystem.getSystemPath());
+                logMessage("Changed directory to: " + fileSystem.getCurrentPath());
                 updateAllUIElements();
             } catch (FileSystemException e) { //
                 logMessage("Error cd: " + e.getMessage());
@@ -457,13 +457,13 @@ public class FileSystemGUI extends JFrame {
 
     private void handleRmdir() {
         int confirmation = JOptionPane.showConfirmDialog(this,
-            "Are you sure you want to remove the CURRENT directory (" + fileSystem.getSystemPath() + ")?\nThis will only succeed if the directory is empty.",
+            "Are you sure you want to remove the CURRENT directory (" + fileSystem.getCurrentPath() + ")?\nThis will only succeed if the directory is empty.",
             "Confirm rmdir",
             JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
 
         if (confirmation == JOptionPane.YES_OPTION) {
             try {
-                String oldPath = fileSystem.getSystemPath();
+                String oldPath = fileSystem.getCurrentPath();
                 fileSystem.removeDir(); //
                 logMessage("Directory '" + oldPath + "' removed.");
                 updateAllUIElements();
