@@ -1,11 +1,9 @@
-package filesystemsimulator; // Paket sejajar dengan Main.java
+package filesystemsimulator;
 
-import filesystemsimulator.exceptions.FileSystemException; // Impor diperlukan
-import filesystemsimulator.filesystem.FileSystem; // Impor diperlukan
-import filesystemsimulator.filestructures.data.DirectoryTree; // Impor diperlukan
-import filesystemsimulator.filestructures.data.FileType; // Impor diperlukan
-
-
+import filesystemsimulator.exceptions.FileSystemException;
+import filesystemsimulator.filesystem.FileSystem;
+import filesystemsimulator.filestructures.data.DirectoryTree;
+import filesystemsimulator.filestructures.data.FileType;
 import javax.swing.*;
 import javax.swing.tree.*;
 import java.awt.*;
@@ -200,6 +198,10 @@ public class FileSystemGUI extends JFrame {
         setupButton(cdButton, buttonSize, panel, rigidArea);
         cdButton.addActionListener(e -> handleCd());
 
+        JButton moveButton = new JButton("mv"); // Atau "Move" jika Anda lebih suka
+        setupButton(moveButton, buttonSize, panel, rigidArea);
+        moveButton.addActionListener(e -> handleMove());
+
         JButton catButton = new JButton("cat (to view)");
         setupButton(catButton, buttonSize, panel, rigidArea);
         catButton.addActionListener(e -> handleCat());
@@ -302,46 +304,102 @@ public class FileSystemGUI extends JFrame {
         }
     }
     private void showHelpDialog() {
-        // Mengambil usages dari Command.COMMAND_USAGES
-        // Command.printCommandUsages() mencetak ke System.out
-        // Jadi kita bisa menangkapnya atau membuat string secara manual.
-        // Untuk kesederhanaan, kita buat string.
-        StringBuilder helpText = new StringBuilder("Commands and their usages:\n\n");
-        // Anda bisa mengakses Command.COMMAND_USAGES jika public static final String[]
-        // atau mereplikasi string di sini.
-        // Asumsi Command.COMMAND_USAGES tidak bisa diakses langsung, jadi kita hardcode.
-        // Lebih baik jika Command.java menyediakan metode getUsageStrings()
-        String[] usages = { // Diambil dari Command.java
-            "mkdir <dir_name>",
-            "rmdir (removes current directory if empty)",
-            "ls (lists content of current directory in log)",
-            "cd <name> or cd <name1/name2/...> or cd .. or cd /",
-            "cp <source_name> <dest_name>",
-            "rm <file_name>",
-            "cat <file_name> (shows content in the view area)",
-            "write <file_name> \"<content>\" or write +append <file_name> \"<content>\"",
-            "import <ext_path> <file_name> or import +append <ext_path> <file_name> \"<content>\"",
-            "export <file_name> <ext_path>"
-        };
-        for (String usage : usages) {
-            helpText.append(usage).append("\n");
-        }
 
-        JTextArea helpTextArea = new JTextArea(helpText.toString());
-        helpTextArea.setEditable(false);
-        helpTextArea.setWrapStyleWord(true);
-        helpTextArea.setLineWrap(true);
-        JScrollPane scrollPane = new JScrollPane(helpTextArea);
-        scrollPane.setPreferredSize(new Dimension(450, 300));
-        JOptionPane.showMessageDialog(this, scrollPane, "Help - Command Usages", JOptionPane.INFORMATION_MESSAGE);
+        String helpText = "<html><body style='width: 450px;'>" + "<h2>Daftar Perintah dan Penggunaannya:</h2>" +
+            "<h3>Operasi File dan Direktori:</h3>" + // Judul bagian
+
+            // Perintah mkdir
+            "<p><b>mkdir &lt;nama_direktori&gt;</b><br>" +
+            "Membuat direktori baru di lokasi (path) saat ini.<br>" +
+            "<i>Contoh:</i> Jika path saat ini adalah <code>/</code>, masukkan <code>direktoriKu</code> pada dialog untuk membuat direktori <code>/direktoriKu</code>.</p>" +
+
+            // Perintah rmdir
+            "<p><b>rmdir</b><br>" +
+            "Menghapus direktori <u>saat ini</u>. Operasi ini hanya berhasil jika direktori tersebut kosong. Anda akan diminta konfirmasi sebelum penghapusan.<br>" +
+            "<i>Contoh:</i> Jika path saat ini adalah <code>/direktoriKu</code> (dan direktori tersebut kosong), perintah <code>rmdir</code> akan menghapus <code>direktoriKu</code> dan path saat ini akan kembali ke direktori induknya (<code>/</code>).</p>" +
+
+            // Perintah ls
+            "<p><b>ls (ke log)</b><br>" +
+            "Menampilkan daftar isi (file dan subdirektori) dari direktori saat ini. Output akan ditampilkan di area log di bagian bawah antarmuka.<br>" +
+            "<i>Contoh:</i> Jika direktori <code>/direktoriKu</code> berisi file <code>catatan.txt</code> dan subdirektori <code>gambar/</code>, output di log akan menampilkan kedua item tersebut.</p>" +
+
+            // Perintah cd
+            "<p><b>cd &lt;path_tujuan&gt;</b><br>" +
+            "Mengubah direktori aktif saat ini ke <u>path_tujuan</u>. Path tujuan dapat berupa:<br>" +
+            "  - Nama subdirektori yang ada di direktori saat ini (misalnya, <code>subDir</code>).<br>" +
+            "  - Path relatif dari direktori saat ini (misalnya, <code>folder/subfolder</code>).<br>" +
+            "  - Path absolut dari root direktori (misalnya, <code>/dokumen/penting</code>).<br>" +
+            "  - Simbol <code>..</code> untuk pindah ke direktori induk satu tingkat di atas.<br>" +
+            "  - Simbol <code>/</code> untuk pindah langsung ke direktori root.<br>" +
+            "<i>Contoh:</i> Jika path saat ini <code>/</code>, masukkan <code>dokumen</code> untuk mengubah path ke <code>/dokumen</code>.<br>" +
+            "<i>Contoh:</i> Jika path saat ini <code>/dokumen/penting</code>, masukkan <code>..</code> untuk mengubah path ke <code>/dokumen</code>.</p>" +
+
+            // Perintah cp
+            "<p><b>cp &lt;nama_sumber&gt; &lt;nama_tujuan&gt;</b><br>" +
+            "Menyalin file dari <u>nama_sumber</u> menjadi <u>nama_tujuan</u>. Kedua file (sumber dan tujuan) berada di dalam <u>direktori saat ini</u>.<br>" +
+            "<i>Contoh:</i> Jika path saat ini adalah <code>/data</code> dan terdapat file <code>laporan.txt</code>, masukkan <code>laporan.txt</code> sebagai sumber dan <code>laporan_salinan.txt</code> sebagai tujuan. Ini akan membuat file baru <code>/data/laporan_salinan.txt</code> yang isinya sama dengan <code>laporan.txt</code>.</p>" +
+
+            // Perintah mv
+            "<p><b>mv &lt;path_sumber&gt; &lt;path_tujuan&gt;</b><br>" +
+            "Memindahkan atau mengganti nama (rename) sebuah file atau direktori.<br>" +
+            "  - Jika <u>path_tujuan</u> adalah sebuah direktori yang sudah ada, maka item dari <u>path_sumber</u> akan dipindahkan ke dalam direktori tujuan tersebut dengan nama aslinya.<br>" +
+            "  - Jika <u>path_tujuan</u> menyertakan nama baru (bukan direktori yang ada), maka item dari <u>path_sumber</u> akan dipindahkan ke lokasi parent dari path_tujuan dan diganti namanya sesuai nama terakhir di path_tujuan.<br>" +
+            "<i>Contoh (memindahkan file ke direktori lain):</i> Sumber: <code>/fileA.txt</code>, Tujuan: <code>/dir1</code> (atau bisa juga <code>/dir1/</code>). Hasilnya: <code>fileA.txt</code> akan berada di dalam <code>/dir1/</code> menjadi <code>/dir1/fileA.txt</code>.<br>" +
+            "<i>Contoh (mengganti nama file):</i> Sumber: <code>data_lama.txt</code>, Tujuan: <code>data_baru.txt</code> (keduanya di direktori saat ini). Hasilnya: file <code>data_lama.txt</code> akan berganti nama menjadi <code>data_baru.txt</code>.<br>" +
+            "<i>Contoh (memindahkan dan mengganti nama file):</i> Sumber: <code>/dir_awal/fileX.doc</code>, Tujuan: <code>/dir_akhir/fileY.doc</code>. Hasilnya: file <code>fileX.doc</code> akan pindah ke <code>/dir_akhir/</code> dan berganti nama menjadi <code>fileY.doc</code>.<br>" +
+            "<i>Contoh (memindahkan direktori):</i> Sumber: <code>/folder_proyek</code>, Tujuan: <code>/arsip/</code>. Hasilnya: direktori <code>folder_proyek</code> (beserta isinya) akan pindah menjadi <code>/arsip/folder_proyek</code>.<br>" +
+            "<i>Contoh (mengganti nama direktori):</i> Sumber: <code>folder_sementara</code>, Tujuan: <code>folder_final</code> (keduanya di direktori saat ini). Hasilnya: direktori <code>folder_sementara</code> akan berganti nama menjadi <code>folder_final</code>.</p>" +
+
+            // Perintah rm
+            "<p><b>rm &lt;nama_file&gt;</b><br>" +
+            "Menghapus (delete) sebuah file bernama <u>nama_file</u> yang berada di <u>direktori saat ini</u>. Anda akan diminta konfirmasi sebelum file dihapus secara permanen.<br>" +
+            "<i>Contoh:</i> Jika path saat ini <code>/sementara</code>, masukkan <code>buang.tmp</code> pada dialog untuk menghapus file <code>/sementara/buang.tmp</code>.</p>" +
+            "<h3>Operasi Isi File:</h3>" +
+
+            // Perintah cat
+            "<p><b>cat &lt;nama_file&gt; (lihat)</b><br>" +
+            "Menampilkan isi dari file bernama <u>nama_file</u> (yang berada di direktori saat ini) ke area tampilan konten file yang tersedia di antarmuka. Anda juga bisa menampilkan isi file dengan mengklik nama file tersebut pada tampilan struktur direktori (tree view).<br>" +
+            "<i>Contoh:</i> Masukkan <code>info.txt</code> pada dialog untuk melihat konten dari file <code>info.txt</code>.</p>" +
+
+            // Perintah write
+            "<p><b>write &lt;nama_file&gt; \"&lt;konten&gt;\"</b><br>" +
+            "Menulis <u>konten</u> yang diberikan ke dalam file bernama <u>nama_file</u> yang berada di direktori saat ini.<br>" +
+            "Jika <u>nama_file</u> sudah ada, isinya akan ditimpa dengan konten baru. Jika belum ada, file baru akan dibuat.<br>" +
+            "Gunakan opsi/centang <code>+append</code> pada dialog input untuk menambahkan <u>konten</u> ke bagian akhir dari file yang sudah ada, tanpa menimpa isi sebelumnya.<br>" +
+            "<i>Contoh (timpa/buat baru):</i> Nama file: <code>surat.txt</code>, Konten: <code>Ini isi surat saya.</code><br>" +
+            "<i>Contoh (tambahkan ke akhir):</i> Centang <code>+append</code>, Nama file: <code>log_harian.txt</code>, Konten: <code>Aktivitas baru telah ditambahkan.</code></p>" +
+            "<h3>Interaksi dengan Sistem File Host (Komputer Anda):</h3>" +
+
+            // Perintah import
+            "<p><b>import &lt;path_eksternal&gt; &lt;nama_file_di_simulator&gt;</b><br>" +
+            "Mengimpor sebuah file dari sistem file komputer Anda (ditentukan oleh <u>path_eksternal</u>) ke dalam <u>direktori saat ini</u> di simulator, dan disimpan dengan nama <u>nama_file_di_simulator</u>.<br>" +
+            "Gunakan tombol 'Browse...' pada dialog untuk mempermudah pemilihan file dari komputer Anda.<br>" +
+            "<i>Contoh:</i> Path eksternal: <code>C:\\Users\\Andi\\Dokumen\\penting.docx</code>, Nama file di simulator: <code>dokumen_penting.docx</code>. Ini akan mengimpor file tersebut ke direktori aktif di simulator dengan nama <code>dokumen_penting.docx</code>.</p>" +
+            // Anda bisa menambahkan penjelasan untuk +append jika sudah ada di dialog import
+            // helpText.append("Opsi <code>+append</code> juga tersedia jika Anda ingin menambahkan konten ke file yang diimpor.<br>");
+
+            // Perintah export
+            "<p><b>export &lt;nama_file_di_simulator&gt; &lt;path_eksternal&gt;</b><br>" +
+            "Mengekspor file bernama <u>nama_file_di_simulator</u> (dari direktori saat ini di simulator) ke sistem file komputer Anda di lokasi yang ditentukan oleh <u>path_eksternal</u>.<br>" +
+            "Gunakan tombol 'Browse/Set Lokasi Simpan...' pada dialog untuk memilih direktori dan nama file tujuan di komputer Anda.<br>" +
+            "<i>Contoh:</i> Nama file di simulator: <code>hasil_simulasi.csv</code>, Path eksternal: <code>D:\\Kerja\\Proyek\\data_output.csv</code>. Ini akan mengekspor file <code>hasil_simulasi.csv</code> dari simulator dan menyimpannya sebagai <code>data_output.csv</code> di komputer Anda.</p>" +
+            "</body></html>";
+
+        // Menggunakan JEditorPane untuk menampilkan teks HTML
+        JEditorPane editorPane = new JEditorPane("text/html", helpText);
+        editorPane.setEditable(false); // Agar teks tidak bisa diubah oleh pengguna
+        // Menambahkan sedikit jarak (padding) di sekitar teks
+        editorPane.setBorder(BorderFactory.createEmptyBorder(10, 15, 10, 15));
+
+
+        JScrollPane scrollPane = new JScrollPane(editorPane);
+        // Mengatur ukuran preferensi dialog agar nyaman dibaca
+        scrollPane.setPreferredSize(new Dimension(650, 500));
+
+        JOptionPane.showMessageDialog(this, scrollPane, "Bantuan - Penggunaan Perintah", JOptionPane.INFORMATION_MESSAGE);
     }
 
-
     // --- HANDLER TOMBOL ---
-    // (Implementasi handler dari respons sebelumnya, pastikan memanggil
-    //  logMessage(...) dan updateAllUIElements() atau updateDirectoryTreeDisplay()
-    //  di tempat yang sesuai)
-
     private void handleMkdir() {
         String dirName = JOptionPane.showInputDialog(this, "Enter directory name:", "mkdir", JOptionPane.PLAIN_MESSAGE);
         if (dirName != null && !dirName.trim().isEmpty()) {
@@ -612,6 +670,45 @@ public class FileSystemGUI extends JFrame {
                 }
             } else {
                 logMessage("Export operation cancelled or paths empty.");
+            }
+        }
+    }
+
+    private void handleMove() {
+        JTextField sourcePathField = new JTextField(30);
+        JTextField destPathField = new JTextField(30);
+
+        JPanel panel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridwidth = GridBagConstraints.REMAINDER;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.insets = new Insets(2, 2, 2, 2);
+
+        panel.add(new JLabel("Source path (file or directory):"), gbc);
+        panel.add(sourcePathField, gbc);
+        panel.add(new JLabel("Destination path (directory or new path/name):"), gbc);
+        panel.add(destPathField, gbc);
+
+        int result = JOptionPane.showConfirmDialog(this, panel, "Move Item (mv)", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (result == JOptionPane.OK_OPTION) {
+            String sourcePath = sourcePathField.getText();
+            String destPath = destPathField.getText();
+
+            if (sourcePath != null && !sourcePath.trim().isEmpty() && destPath != null && !destPath.trim().isEmpty()) {
+                try {
+                    fileSystem.moveItem(sourcePath, destPath);
+                    logMessage("Item '" + sourcePath + "' moved to '" + destPath + "'.");
+                    updateAllUIElements(); // Update tree dan path saat ini
+                } catch (FileSystemException e) { // Tangkap FileSystemException saja
+                    logMessage("Error move: " + e.getMessage());
+                    JOptionPane.showMessageDialog(this, "Error moving item: " + e.getMessage(), "Move Error", JOptionPane.ERROR_MESSAGE);
+                }
+                // IOException seharusnya sudah ditangani dan dibungkus sebagai FileSystemException oleh FileSystem.java
+                // Jika Anda ingin menangkap IOException secara terpisah di sini, Anda bisa,
+                // tetapi lebih baik jika FileSystem.java yang konsisten melempar FileSystemException.
+            } else {
+                logMessage("Move operation cancelled or paths empty.");
             }
         }
     }
