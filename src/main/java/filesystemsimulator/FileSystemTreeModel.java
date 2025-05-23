@@ -12,7 +12,7 @@ import java.util.Vector;
 public class FileSystemTreeModel implements TreeModel {
 
     private DirectoryTree.Node rootNode;
-    private Vector<TreeModelListener> listeners = new Vector<>();
+    private final Vector<TreeModelListener> listeners = new Vector<>();
 
     public FileSystemTreeModel(DirectoryTree.Node rootNode) {
         this.rootNode = rootNode;
@@ -24,10 +24,10 @@ public class FileSystemTreeModel implements TreeModel {
         // TreePath ke root adalah new Object[]{this.rootNode}
         // Jika rootNode itu sendiri adalah null (misalnya, file system belum siap), JTree akan kosong.
         if (this.rootNode != null) {
-            fireTreeStructureChanged(this, new Object[]{this.rootNode}, null, null);
+            fireTreeStructureChanged(this, new Object[]{this.rootNode});
         } else {
             // Jika root menjadi null, kirim event dengan source saja atau path kosong jika didukung
-            fireTreeStructureChanged(this, new Object[]{}, null, null);
+            fireTreeStructureChanged(this, new Object[]{});
         }
     }
 
@@ -106,8 +106,8 @@ public class FileSystemTreeModel implements TreeModel {
 
     // Metode untuk memberi tahu listener tentang perubahan
     // source adalah model ini, path adalah path ke node yang berubah
-    protected void fireTreeStructureChanged(Object source, Object[] path, int[] childIndices, Object[] children) {
-        TreeModelEvent e = new TreeModelEvent(source, path, childIndices, children);
+    protected void fireTreeStructureChanged(Object source, Object[] path) {
+        TreeModelEvent e = new TreeModelEvent(source, path, null, null);
         for (TreeModelListener tml : listeners) {
             tml.treeStructureChanged(e);
         }

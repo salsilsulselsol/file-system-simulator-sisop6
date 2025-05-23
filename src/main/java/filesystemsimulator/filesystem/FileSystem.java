@@ -8,8 +8,6 @@ import java.nio.file.Path;
 import filesystemsimulator.datastructures.LinkedList;
 import filesystemsimulator.datastructures.StringAppender;
 import filesystemsimulator.exceptions.FileSystemException;
-import filesystemsimulator.filestructures.container.*;
-import filesystemsimulator.filestructures.data.*;
 import filesystemsimulator.filestructures.container.Bitmap;
 import filesystemsimulator.filestructures.container.DataBlock;
 import filesystemsimulator.filestructures.container.IndexNode;

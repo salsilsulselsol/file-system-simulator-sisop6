@@ -111,8 +111,7 @@ public class FileSystemGUI extends JFrame {
             TreePath selectedPath = e.getPath();
             if (selectedPath != null) {
                 Object lastComponent = selectedPath.getLastPathComponent();
-                if (lastComponent instanceof DirectoryTree.Node) {
-                    DirectoryTree.Node selectedNode = (DirectoryTree.Node) lastComponent;
+                if (lastComponent instanceof DirectoryTree.Node selectedNode) {
                     if (selectedNode.type == FileType.FILE) { //
                         displayFileContent(selectedNode.name);
                     } else {
@@ -276,6 +275,7 @@ public class FileSystemGUI extends JFrame {
             if (directoryTreeComponent.getRowCount() > 0) {
                 directoryTreeComponent.expandRow(0);
                 // Pilih root node setelah update
+                assert currentTreeRoot != null;
                 directoryTreeComponent.setSelectionPath(new TreePath(currentTreeRoot));
             }
         } else {
@@ -294,7 +294,6 @@ public class FileSystemGUI extends JFrame {
             fileSystem.printFile(fileName); //
             System.out.flush();
             fileContentArea.setText(baos.toString());
-            // logMessage("Content of '" + fileName + "' displayed in view area.");
         } catch (FileSystemException e) { //
             logMessage("Error displaying file " + fileName + ": " + e.getMessage());
             fileContentArea.setText("Error displaying file: " + e.getMessage());
@@ -621,9 +620,9 @@ public class FileSystemGUI extends JFrame {
     private static class FileSystemCellRenderer extends DefaultTreeCellRenderer {
         private Icon folderIcon;
         private Icon fileIcon;
-        private Icon defaultClosedIcon;
-        private Icon defaultOpenIcon;
-        private Icon defaultLeafIcon;
+        private final Icon defaultClosedIcon;
+        private final Icon defaultOpenIcon;
+        private final Icon defaultLeafIcon;
 
 
         public FileSystemCellRenderer() {
@@ -637,8 +636,7 @@ public class FileSystemGUI extends JFrame {
                                                       boolean sel, boolean expanded,
                                                       boolean leaf, int row, boolean hasFocus) {
             super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
-            if (value instanceof DirectoryTree.Node) {
-                DirectoryTree.Node node = (DirectoryTree.Node) value;
+            if (value instanceof DirectoryTree.Node node) {
                 setText(node.name);
                 if (node.type == FileType.DIRECTORY) { //
                     setIcon(expanded ? defaultOpenIcon : defaultClosedIcon);

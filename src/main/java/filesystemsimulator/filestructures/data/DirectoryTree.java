@@ -1,6 +1,5 @@
 package filesystemsimulator.filestructures.data;
 
-import filesystemsimulator.datastructures.*;
 import filesystemsimulator.datastructures.LinkedList;
 import filesystemsimulator.datastructures.StringAppender;
 import filesystemsimulator.datastructures.StringList;

@@ -2,7 +2,6 @@ package filesystemsimulator.filestructures.container;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.util.Arrays;
 
 import filesystemsimulator.exceptions.FileSystemException;
 import filesystemsimulator.filestructures.data.FileType;
@@ -132,11 +131,7 @@ public class IndexNode {
 		return allocatedBlockCount;
 	}
 
-	public String getName() {
-		return new String(Arrays.copyOfRange(name, 0, nameSize));
-	}
-
-	/**
+    /**
 	 * Sets the node's name to the given string.
 	 *
 	 * @param name the new name of the node.
