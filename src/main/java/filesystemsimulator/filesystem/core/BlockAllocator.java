@@ -11,14 +11,14 @@ public class BlockAllocator {
 
     private final RandomAccessFile containerFile;
     private final SuperBlock superBlock;
-    private final Bitmap inodeBitmapBuffer; // Buffer untuk operasi bitmap
-    private final Bitmap dataBitmapBuffer;  // Buffer untuk operasi bitmap
+    private final Bitmap inodeBitmapBuffer;
+    private final Bitmap dataBitmapBuffer;
 
     public BlockAllocator(RandomAccessFile containerFile, SuperBlock superBlock) {
         this.containerFile = containerFile;
         this.superBlock = superBlock;
-        this.inodeBitmapBuffer = new Bitmap(); // Buat buffer sekali
-        this.dataBitmapBuffer = new Bitmap();  // Buat buffer sekali
+        this.inodeBitmapBuffer = new Bitmap();
+        this.dataBitmapBuffer = new Bitmap();
     }
 
     private void readBitmapToBuffer(Bitmap buffer, int regionOffset, int bitmapBlockIndexInRegion) throws IOException {
@@ -39,7 +39,7 @@ public class BlockAllocator {
             readBitmapToBuffer(inodeBitmapBuffer, superBlock.getInodeBitmapOffset(), i);
             int firstFreeBitInBlock = inodeBitmapBuffer.getFirstFreeBit();
             if (firstFreeBitInBlock != -1) {
-                inodeBitmapBuffer.resetBit(firstFreeBitInBlock); // Tandai sebagai terpakai (0)
+                inodeBitmapBuffer.resetBit(firstFreeBitInBlock);
                 writeBitmapFromBuffer(inodeBitmapBuffer, superBlock.getInodeBitmapOffset(), i);
                 return (i * (superBlock.getBlockSize() * 8)) + firstFreeBitInBlock;
             }
@@ -53,7 +53,7 @@ public class BlockAllocator {
         int bitIndexInBitmapBlock = inodeNumber % bitsPerBitmapBlock;
 
         readBitmapToBuffer(inodeBitmapBuffer, superBlock.getInodeBitmapOffset(), bitmapBlockIndexRelativeToRegion);
-        inodeBitmapBuffer.setBit(bitIndexInBitmapBlock); // Tandai sebagai bebas (1)
+        inodeBitmapBuffer.setBit(bitIndexInBitmapBlock);
         writeBitmapFromBuffer(inodeBitmapBuffer, superBlock.getInodeBitmapOffset(), bitmapBlockIndexRelativeToRegion);
     }
 
@@ -97,19 +97,39 @@ public class BlockAllocator {
         }
     }
 
-    // ...existing code...
+    // PERBAIKAN: Logika penghitungan yang lebih akurat untuk mengabaikan padding bits.
+    private int countUsedInBitmap(int bitmapOffset, int totalItems, int bitmapSizeInBytes) throws IOException {
+        containerFile.seek((long) bitmapOffset * superBlock.getBlockSize());
+        byte[] bitmap = new byte[bitmapSizeInBytes];
+        containerFile.readFully(bitmap);
+
+        int freeCount = 0;
+        int fullBytes = totalItems / 8;
+        int remainingBits = totalItems % 8;
+
+        for (int i = 0; i < fullBytes; i++) {
+            freeCount += Integer.bitCount(bitmap[i] & 0xFF);
+        }
+
+        if (remainingBits > 0) {
+            byte lastByte = bitmap[fullBytes];
+            for (int i = 0; i < remainingBits; i++) {
+                if ((lastByte & (1 << (7 - i))) != 0) {
+                    freeCount++;
+                }
+            }
+        }
+
+        return totalItems - freeCount;
+    }
 
     public int getUsedInodeCount() throws FileSystemException {
         try {
-            int count = 0;
-            containerFile.seek(superBlock.getInodeBitmapOffset());
-            byte[] inodeBitmap = new byte[superBlock.getInodeBitmapSize()];
-            containerFile.readFully(inodeBitmap);
-            
-            for (byte b : inodeBitmap) {
-                count += Integer.bitCount(b & 0xFF);
-            }
-            return count;
+            return countUsedInBitmap(
+                superBlock.getInodeBitmapOffset(),
+                superBlock.getInodeCount(),
+                superBlock.getInodeBitmapSize()
+            );
         } catch (IOException e) {
             throw new FileSystemException("Error reading inode bitmap: " + e.getMessage(), e);
         }
@@ -117,19 +137,13 @@ public class BlockAllocator {
 
     public int getUsedDataBlockCount() throws FileSystemException {
         try {
-            int count = 0;
-            containerFile.seek(superBlock.getDataBlockBitmapOffset());
-            byte[] dataBlockBitmap = new byte[superBlock.getDataBlockBitmapSize()];
-            containerFile.readFully(dataBlockBitmap);
-            
-            for (byte b : dataBlockBitmap) {
-                count += Integer.bitCount(b & 0xFF);
-            }
-            return count;
+            return countUsedInBitmap(
+                superBlock.getDataBlockBitmapOffset(),
+                superBlock.getDataBlockCount(),
+                superBlock.getDataBlockBitmapSize()
+            );
         } catch (IOException e) {
             throw new FileSystemException("Error reading data block bitmap: " + e.getMessage(), e);
         }
     }
-
-// ...existing code...
 }

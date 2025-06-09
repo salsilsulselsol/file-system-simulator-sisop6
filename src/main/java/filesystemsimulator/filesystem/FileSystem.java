@@ -19,14 +19,13 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths; // Import Paths
+import java.nio.file.Paths;
 
 public class FileSystem {
 
     public static final byte BYTE_MAX = (byte) 0xff; // 255
 
     private RandomAccessFile containerFile;
-    // private String containerFilePath; // Tidak digunakan secara aktif setelah konstruktor
     public final DirectoryTree tree;
     private final SuperBlock superBlock;
 
@@ -37,7 +36,6 @@ public class FileSystem {
     private final PathResolver pathResolver;
 
     public FileSystem(String systemPath, long size) throws FileSystemException {
-        // this.containerFilePath = systemPath;
         this.superBlock = new SuperBlock();
 
         try {
@@ -52,7 +50,6 @@ public class FileSystem {
             this.tree = new DirectoryTree("root", 0); // Inode 0 untuk root
             this.pathResolver = new PathResolver(tree);
 
-            // Sinkronisasi nama root dari tree dengan inode root dari disk
             IndexNode rootInodeFromDisk = inodeManager.readNode(0);
             if (!tree.root.name.equals(rootInodeFromDisk.getNameString())) {
                 System.err.println("Warning: DirectoryTree root name ('" + tree.root.name +
@@ -60,7 +57,7 @@ public class FileSystem {
                     "') mismatch after init. Synchronizing tree name from disk.");
                 tree.root.name = rootInodeFromDisk.getNameString();
             }
-            tree.root.inodeNumber = 0; // Pastikan nomor inode root di tree adalah 0
+            tree.root.inodeNumber = 0;
 
         } catch (IOException e) {
             throw new FileSystemException("An i/o error occurred while initializing the file system: " + e.getMessage(), e);
@@ -70,7 +67,7 @@ public class FileSystem {
     private void initializeFileSystemStructure(long size) throws IOException, FileSystemException {
         superBlock.initialize(size);
 
-        containerFile.setLength(0); // Bersihkan file
+        containerFile.setLength(0);
         containerFile.setLength((long) superBlock.getTotalBlockCount() * superBlock.getBlockSize());
 
         containerFile.seek(0);
@@ -83,19 +80,16 @@ public class FileSystem {
     private void initializeRootInodeOnDisk() throws IOException, FileSystemException {
         int rootInodeNum = blockAllocator.allocateInode();
         if (rootInodeNum != 0) {
-            throw new FileSystemException("Critical: Failed to allocate inode 0 for root. Allocated: " + rootInodeNum +
-                ". This usually means an issue with bitmap initialization or SuperBlock calculation.");
+            throw new FileSystemException("Critical: Failed to allocate inode 0 for root. Allocated: " + rootInodeNum);
         }
 
         IndexNode rootDiskInode = new IndexNode();
         rootDiskInode.setName("root");
         rootDiskInode.setType(FileType.DIRECTORY);
         rootDiskInode.setParentInode(rootInodeNum); // Parent root adalah dirinya sendiri
-        rootDiskInode.setSize(0); // Direktori root awalnya kosong
+        rootDiskInode.setSize(0);
         inodeManager.writeNode(rootDiskInode, rootInodeNum);
     }
-
-    // --- Metode Publik FileSystem ---
 
     public String getCurrentPath() {
         return tree.getPath();
@@ -114,20 +108,15 @@ public class FileSystem {
             return;
         }
 
-        // Gunakan PathResolver hanya untuk validasi dan mendapatkan node target
-        // Navigasi tree aktual dilakukan oleh tree.goTo() agar path internal tree konsisten
         PathResolver.PathResolutionResult result = pathResolver.resolve(pathStr, tree.getCurrentDir());
 
         if (result.exists && result.node != null && result.node.type == FileType.DIRECTORY) {
-            // Untuk mengubah direktori aktual, kita perlu menavigasi tree
-            // Jika path absolut, mulai dari root
             if (pathStr.startsWith("/")) {
                 tree.goToRoot();
-                if (pathStr.equals("/")) return; // Sudah di root
+                if (pathStr.equals("/")) return;
                 String[] sequence = StringManipulator.split(pathStr.substring(1), '/');
-                tree.goTo(sequence); // goTo akan handle komponen kosong dan navigasi
+                tree.goTo(sequence);
             } else {
-                // Jika path relatif, gunakan goTo dari currentDir
                 String[] sequence = StringManipulator.split(pathStr, '/');
                 tree.goTo(sequence);
             }
@@ -162,7 +151,7 @@ public class FileSystem {
             newFileInode.setType(type);
             newFileInode.setParentInode(parentDirInodeNum);
             if (type == FileType.DIRECTORY) {
-                newFileInode.setSize(0); // Direktori tidak punya ukuran file eksplisit, tapi kita set 0
+                newFileInode.setSize(0);
             }
             inodeManager.writeNode(newFileInode, newInodeNum);
 
@@ -179,7 +168,7 @@ public class FileSystem {
     public void listCurrentDir() {
         DirectoryTree.Node current = tree.getCurrentDir();
         System.out.print(current.name + "$ ls: ");
-        if (current != tree.root && current.parent != null) { // Hanya tampilkan .. jika bukan di root
+        if (current != tree.root && current.parent != null) {
             System.out.print("..  ");
         }
         if (current.childNodes != null) {
@@ -249,7 +238,7 @@ public class FileSystem {
 
         makeFile(fileName, FileType.FILE);
         DirectoryTree.Node fileNode = tree.getChild(fileName);
-        if (fileNode == null) { // Seharusnya tidak terjadi jika makeFile berhasil
+        if (fileNode == null) {
             throw new FileSystemException("Internal error: File node not found after creation for '" + fileName + "'.");
         }
 
@@ -285,7 +274,7 @@ public class FileSystem {
 
         DirectoryTree.Node fileNode = tree.getChild(fileName);
         if (fileNode == null) {
-            writeToFile(fileName, bytesToAppend); // File tidak ada, buat baru
+            writeToFile(fileName, bytesToAppend);
             return;
         }
         if (fileNode.type == FileType.DIRECTORY) {
@@ -297,26 +286,24 @@ public class FileSystem {
             int currentFileSize = fileInode.getSize();
             int bytesAppendedThisOperation = 0;
 
-            // Handle sisa di blok terakhir yang ada
             int[] currentDataBlocks = fileInode.getAllocatedDirectBlocks();
             if (currentDataBlocks.length > 0) {
                 int lastDataBlockNum = currentDataBlocks[currentDataBlocks.length - 1];
                 DataBlock lastBlock = dataBlockManager.readBlock(lastDataBlockNum);
                 int bytesInLastBlock = currentFileSize % superBlock.getBlockSize();
-                if (bytesInLastBlock == 0 && currentFileSize > 0) bytesInLastBlock = superBlock.getBlockSize(); // Blok penuh
+                if (bytesInLastBlock == 0 && currentFileSize > 0) bytesInLastBlock = superBlock.getBlockSize();
 
                 int freeSpaceInLastBlock = superBlock.getBlockSize() - bytesInLastBlock;
                 if (freeSpaceInLastBlock > 0) {
                     int countToAppendToLast = Math.min(bytesToAppend.length, freeSpaceInLastBlock);
                     byte[] segmentForLast = ArrayManipulator.subArray(bytesToAppend, 0, countToAppendToLast);
-                    lastBlock.appendBytes(segmentForLast); // Asumsi appendBytes di DataBlock ada
+                    lastBlock.appendBytes(segmentForLast);
                     dataBlockManager.writeBlock(lastBlock, lastDataBlockNum);
                     currentFileSize += countToAppendToLast;
                     bytesAppendedThisOperation += countToAppendToLast;
                 }
             }
 
-            // Tulis sisa byte (jika ada) ke blok baru
             if (bytesAppendedThisOperation < bytesToAppend.length) {
                 byte[] remainingBytes = ArrayManipulator.subArray(bytesToAppend, bytesAppendedThisOperation, bytesToAppend.length);
                 int neededNewBlocks = calculateNeededBlocks(remainingBytes.length);
@@ -359,11 +346,10 @@ public class FileSystem {
                 DataBlock dataBlock = dataBlockManager.readBlock(dataBlockNum);
                 int bytesToReadFromThisBlock = Math.min(superBlock.getBlockSize(), fileSize - totalBytesRead);
 
-                // Buat string hanya dari byte yang relevan
                 byte[] blockBytes = dataBlock.getBytes();
                 byte[] relevantBytes = new byte[bytesToReadFromThisBlock];
                 System.arraycopy(blockBytes, 0, relevantBytes, 0, bytesToReadFromThisBlock);
-                content.append(new String(relevantBytes)); // Encoding default
+                content.append(new String(relevantBytes));
 
                 totalBytesRead += bytesToReadFromThisBlock;
             }
@@ -385,29 +371,26 @@ public class FileSystem {
             throw new FileSystemException("Destination '" + destinationName + "' already exists.");
         }
 
-        makeFile(destinationName, FileType.FILE); // Buat file tujuan kosong
+        makeFile(destinationName, FileType.FILE);
         DirectoryTree.Node destNode = tree.getChild(destinationName);
         if (destNode == null) throw new FileSystemException("Failed to create destination file '"+destinationName+"' for copy.");
 
 
         try {
             IndexNode sourceInode = inodeManager.readNode(sourceNode.inodeNumber);
-            IndexNode destInode = inodeManager.readNode(destNode.inodeNumber); // Inode tujuan (masih kosong)
+            IndexNode destInode = inodeManager.readNode(destNode.inodeNumber);
             int totalBytesCopied = 0;
 
             for (int sourceDataBlockNum : sourceInode.getAllocatedDirectBlocks()) {
                 DataBlock sourceBlockData = dataBlockManager.readBlock(sourceDataBlockNum);
 
                 int newDataBlockNum = blockAllocator.allocateDataBlock();
-                // Salin konten blok data (bukan objeknya, tapi byte-nya)
                 DataBlock destBlockData = new DataBlock();
-                destBlockData.setBytes(sourceBlockData.getBytes()); // Salin byte
+                destBlockData.setBytes(sourceBlockData.getBytes());
                 dataBlockManager.writeBlock(destBlockData, newDataBlockNum);
 
                 destInode.addDirectBlock(newDataBlockNum);
 
-                // Hitung byte yang disalin dari blok ini
-                // Untuk blok terakhir, mungkin tidak penuh
                 if (totalBytesCopied + superBlock.getBlockSize() <= sourceInode.getSize()){
                     totalBytesCopied += superBlock.getBlockSize();
                 } else {
@@ -415,7 +398,7 @@ public class FileSystem {
                 }
 
             }
-            destInode.setSize(sourceInode.getSize()); // Set ukuran yang sama
+            destInode.setSize(sourceInode.getSize());
             inodeManager.writeNode(destInode, destNode.inodeNumber);
 
         } catch (IOException e) {
@@ -441,7 +424,7 @@ public class FileSystem {
             if (sourceNode.parent == tree.root) originalParentNodeInTree = tree.root;
             else throw new FileSystemException("Cannot determine original parent for source: " + sourcePathStr);
         }
-        if (originalParentNodeInTree == null) { // Seharusnya tidak terjadi jika source bukan root
+        if (originalParentNodeInTree == null) {
             throw new FileSystemException("Critical: Original parent node is null for non-root source.");
         }
 
@@ -491,7 +474,6 @@ public class FileSystem {
         }
 
         try {
-            // Operasi Inode
             IndexNode originalParentInodeObj = inodeManager.readNode(originalParentNodeInTree.inodeNumber);
             originalParentInodeObj.removeDirectBlock(sourceNode.inodeNumber);
             inodeManager.writeNode(originalParentInodeObj, originalParentNodeInTree.inodeNumber);
@@ -509,7 +491,6 @@ public class FileSystem {
                 inodeManager.writeNode(destParentInodeObj, finalDestParentNodeInTree.inodeNumber);
             }
 
-            // Operasi DirectoryTree (setelah operasi inode berhasil)
             if (originalParentNodeInTree.childNodes != null) {
                 originalParentNodeInTree.childNodes.remove(sourceNode);
             }
@@ -596,18 +577,14 @@ public class FileSystem {
         }
     }
 
-
     private int calculateNeededBlocks(int amountOfBytes) {
         if (amountOfBytes == 0) return 0;
         return (int) Math.ceil((float) amountOfBytes / superBlock.getBlockSize());
     }
 
-    // ...existing code...
-
     public void showDirectoryInfo() throws FileSystemException {
         DirectoryTree.Node current = tree.getCurrentDir();
         try {
-            IndexNode currentInode = inodeManager.readNode(current.inodeNumber);
             int totalItems = 0;
             int totalFiles = 0;
             int totalFolders = 0;
@@ -628,7 +605,6 @@ public class FileSystem {
 
                     if (childNode.type == FileType.DIRECTORY) {
                         totalFolders++;
-                        // For directories, calculate size recursively
                         totalSize += calculateDirectorySize(childNode);
                     } else {
                         totalFiles++;
@@ -656,7 +632,6 @@ public class FileSystem {
         System.out.printf("│ %-8s │ %-20s │ %-12s │ %-8s │%n", "Type", "Name", "Size", "Inode");
         System.out.println("├────────────────────────────────────────────────────────────┤");
 
-        // Show parent directory if not root
         if (current != tree.root && current.parent != null) {
             System.out.printf("│ %-8s │ %-20s │ %-12s │ %-8s │%n",
                 "📁 DIR", "..", "<DIR>", "");
@@ -673,10 +648,10 @@ public class FileSystem {
                     String sizeStr = childNode.type == FileType.DIRECTORY ?
                         "<DIR>" : formatFileSize(childInode.getSize());
 
-                    String nameWithColor = getColoredName(childNode.name, childNode.type);
+                    String nameWithoutColor = getColoredName(childNode.name, childNode.type);
 
                     System.out.printf("│ %-8s │ %-20s │ %-12s │ %-8d │%n",
-                        typeIcon, nameWithColor, sizeStr, childNode.inodeNumber);
+                        typeIcon, nameWithoutColor, sizeStr, childNode.inodeNumber);
                 }
             }
         } catch (IOException e) {
@@ -697,55 +672,47 @@ public class FileSystem {
             int totalDataBlocks = superBlock.getDataBlockCount();
             int usedDataBlocks = blockAllocator.getUsedDataBlockCount();
 
-            // DEBUG: Tambahkan informasi debug
             System.out.println("🔍 INFO:");
             System.out.println("   Total Data Blocks Available: " + totalDataBlocks);
             System.out.println("   Used Data Blocks (from bitmap): " + usedDataBlocks);
 
-            // PERBAIKAN: Hitung actual file data blocks dengan cara manual
             int actualFileDataBlocks = calculateTotalFileDataBlocks();
             System.out.println("   Actual File Data Blocks: " + actualFileDataBlocks);
             System.out.println();
 
-            // Tampilkan inode usage
             System.out.println("📦 Inode Usage:");
             System.out.print("   ");
             drawProgressBar(usedInodes, totalInodes, 40, "🟦", "⬜");
             System.out.printf(" %d/%d (%.1f%%)%n", usedInodes, totalInodes,
-                (double)usedInodes/totalInodes*100);
+                totalInodes == 0 ? 0 : (double)usedInodes/totalInodes*100);
 
-            // Tampilkan data block usage (dari bitmap)
             System.out.println("💿 Data Block Usage (Total Allocated):");
             System.out.print("   ");
             drawProgressBar(usedDataBlocks, totalDataBlocks, 40, "🟩", "⬜");
             System.out.printf(" %d/%d (%.1f%%)%n", usedDataBlocks, totalDataBlocks,
-                (double)usedDataBlocks/totalDataBlocks*100);
+                totalDataBlocks == 0 ? 0 : (double)usedDataBlocks/totalDataBlocks*100);
 
-            // PERBAIKAN: Gunakan actualFileDataBlocks untuk "Data Only"
             System.out.println("🗄️  File Data Usage (Content Only):");
             System.out.print("   ");
             drawProgressBar(actualFileDataBlocks, totalDataBlocks, 40, "🟨", "⬜");
             System.out.printf(" %s/%s (%.1f%%)%n",
                 formatFileSize((long)actualFileDataBlocks * superBlock.getBlockSize()),
                 formatFileSize((long)totalDataBlocks * superBlock.getBlockSize()),
-                (double)actualFileDataBlocks/totalDataBlocks*100);
+                totalDataBlocks == 0 ? 0 : (double)actualFileDataBlocks/totalDataBlocks*100);
 
-            // Total system usage
-            long totalAllocatedStorage = (long)superBlock.getTotalBlockCount() * superBlock.getBlockSize();
+            long totalSystemStorage = (long)superBlock.getTotalBlockCount() * superBlock.getBlockSize();
             long usedDataStorage = (long)usedDataBlocks * superBlock.getBlockSize();
-            long usedInodeStorage = (long)usedInodes * 64; // 64 bytes per inode
-            long usedMetadataStorage = superBlock.getBlockSize(); // SuperBlock
-            usedMetadataStorage += superBlock.getInodeBitmapSize(); // Inode bitmap
-            usedMetadataStorage += superBlock.getDataBlockBitmapSize(); // Data bitmap
+            long usedInodeStorage = (long)usedInodes * IndexNode.INODE_SIZE;
+            long usedMetadataStorage = (long)superBlock.getBlockSize() * (superBlock.getInodeBlockOffset() - superBlock.getInodeBitmapOffset());
 
             long totalUsedStorage = usedDataStorage + usedInodeStorage + usedMetadataStorage;
 
             System.out.println("🗄️  Total System Usage:");
             System.out.print("   ");
-            drawProgressBar((int)(totalUsedStorage/512), (int)(totalAllocatedStorage/512), 40, "🟪", "⬜");
+            drawProgressBar(totalUsedStorage, totalSystemStorage, 40, "🟪", "⬜");
             System.out.printf(" %s/%s (%.1f%%)%n",
-                formatFileSize(totalUsedStorage), formatFileSize(totalAllocatedStorage),
-                (double)totalUsedStorage/totalAllocatedStorage*100);
+                formatFileSize(totalUsedStorage), formatFileSize(totalSystemStorage),
+                totalSystemStorage == 0 ? 0 : (double)totalUsedStorage/totalSystemStorage*100);
 
             System.out.println("══════════════════════════════════════════════════════════");
             System.out.println("📊 Detailed Statistics:");
@@ -753,29 +720,26 @@ public class FileSystem {
             System.out.printf("   Free Inodes: %d%n", totalInodes - usedInodes);
             System.out.printf("   Free Data Blocks: %d%n", totalDataBlocks - usedDataBlocks);
             System.out.printf("   Free Data Space: %s%n", formatFileSize((long)(totalDataBlocks - usedDataBlocks) * superBlock.getBlockSize()));
-            System.out.printf("   Actual File Content: %s%n", formatFileSize(calculateNodeContentSize(tree.root)));
+            long actualFileContentSize = calculateNodeContentSize(tree.root);
+            long allocatedDataSpace = (long) actualFileDataBlocks * superBlock.getBlockSize();
+            System.out.printf("   Actual File Content: %s%n", formatFileSize(actualFileContentSize));
             System.out.printf("   Storage Efficiency: %.2f%% (content/allocated)%n",
-                (double)calculateNodeContentSize(tree.root) / (actualFileDataBlocks * superBlock.getBlockSize()) * 100);
+                (allocatedDataSpace == 0) ? 0.0 : (double)actualFileContentSize / allocatedDataSpace * 100);
 
         } catch (Exception e) {
             throw new FileSystemException("Error generating memory visualization: " + e.getMessage(), e);
         }
     }
 
-    // Method yang benar untuk menghitung content size dalam bytes
-    private long calculateTotalFileContentSizeInBytes() throws FileSystemException {
-        return calculateNodeContentSize(tree.root);
-    }
-
     private long calculateNodeContentSize(DirectoryTree.Node node) throws FileSystemException {
         long totalSize = 0;
-        
+
         if (node.type == FileType.FILE) {
             try {
                 IndexNode inode = inodeManager.readNode(node.inodeNumber);
-                totalSize += inode.getSize(); // Size file dalam bytes
+                totalSize += inode.getSize();
             } catch (IOException e) {
-                // Skip jika error
+                // Abaikan jika ada error
             }
         } else if (node.childNodes != null) {
             Object[] children = node.childNodes.toArray();
@@ -784,11 +748,10 @@ public class FileSystem {
                 totalSize += calculateNodeContentSize(child);
             }
         }
-        
+
         return totalSize;
     }
 
-    // Method ini untuk menghitung DATA BLOCKS yang digunakan file
     private int calculateTotalFileDataBlocks() throws FileSystemException {
         return calculateNodeDataBlocks(tree.root);
     }
@@ -799,9 +762,9 @@ public class FileSystem {
         if (node.type == FileType.FILE) {
             try {
                 IndexNode inode = inodeManager.readNode(node.inodeNumber);
-                totalBlocks += inode.getAllocatedDirectBlocks().length; // Jumlah blok yang dialokasikan untuk file ini
+                totalBlocks += inode.getAllocatedDirectBlocks().length;
             } catch (IOException e) {
-                // Skip jika error
+                // Abaikan jika ada error
             }
         } else if (node.childNodes != null) {
             Object[] children = node.childNodes.toArray();
@@ -814,7 +777,11 @@ public class FileSystem {
         return totalBlocks;
     }
 
-    private void drawProgressBar(int used, int total, int width, String usedChar, String freeChar) {
+    private void drawProgressBar(long used, long total, int width, String usedChar, String freeChar) {
+        if (total <= 0) {
+            total = 1;
+            used = 0;
+        }
         int usedWidth = (int)((double)used / total * width);
         int freeWidth = width - usedWidth;
 
@@ -829,26 +796,10 @@ public class FileSystem {
     }
 
     private String getColoredName(String name, FileType type) {
-        // ANSI color codes for different file types
-        if (type == FileType.DIRECTORY) {
-            return "\033[34m" + name + "\033[0m"; // Blue for directories
-        } else {
-            // Color based on file extension
-            if (name.endsWith(".txt") || name.endsWith(".md")) {
-                return "\033[37m" + name + "\033[0m"; // White for text files
-            } else if (name.endsWith(".jpg") || name.endsWith(".png") || name.endsWith(".gif")) {
-                return "\033[35m" + name + "\033[0m"; // Magenta for images
-            } else if (name.endsWith(".java") || name.endsWith(".py") || name.endsWith(".js")) {
-                return "\033[32m" + name + "\033[0m"; // Green for code files
-            } else if (name.endsWith(".exe") || name.endsWith(".bin")) {
-                return "\033[31m" + name + "\033[0m"; // Red for executables
-            } else {
-                return "\033[33m" + name + "\033[0m"; // Yellow for other files
-            }
-        }
+        return name;
     }
 
-    private String formatFileSize(long bytes) {
+    public String formatFileSize(long bytes) {
         if (bytes < 1024) return bytes + " B";
         else if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
         else if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024));
@@ -905,5 +856,38 @@ public class FileSystem {
         }
     }
 
-// ...existing code...
+    // --- Metode Getter untuk GUI ---
+
+    public long getTotalDataSpace() {
+        return (long) superBlock.getDataBlockCount() * superBlock.getBlockSize();
+    }
+
+    public long getUsedDataSpace() throws FileSystemException {
+        return (long) blockAllocator.getUsedDataBlockCount() * superBlock.getBlockSize();
+    }
+
+    public int getTotalInodeCount() {
+        return superBlock.getInodeCount();
+    }
+
+    public int getUsedInodeCount() throws FileSystemException {
+        return blockAllocator.getUsedInodeCount();
+    }
+
+    public int getTotalDataBlockCount() {
+        return superBlock.getDataBlockCount();
+    }
+
+    public int getUsedDataBlockCount() throws FileSystemException {
+        return blockAllocator.getUsedDataBlockCount();
+    }
+
+    public long getActualFileContentSize() throws FileSystemException {
+        return calculateNodeContentSize(tree.root);
+    }
+
+    public long getAllocatedFileSpaceSize() throws FileSystemException {
+        long actualFileDataBlocks = calculateTotalFileDataBlocks();
+        return actualFileDataBlocks * superBlock.getBlockSize();
+    }
 }
