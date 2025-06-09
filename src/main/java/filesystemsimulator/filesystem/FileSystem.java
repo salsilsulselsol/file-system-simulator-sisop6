@@ -824,14 +824,17 @@ public class FileSystem {
         return totalSize;
     }
 
-    public void showFileSystemTree() {
-        System.out.println("🌳 File System Tree:");
-        System.out.println("════════════════════");
-        printTreeNode(tree.root, "", true);
-        System.out.println();
+    // NEW Method to generate the tree as a string
+    public String getFileSystemTreeAsString() {
+        StringBuilder sb = new StringBuilder("🌳 File System Tree:\n");
+        sb.append("════════════════════\n");
+        buildTreeString(tree.root, "", true, sb);
+        sb.append("\n");
+        return sb.toString();
     }
 
-    private void printTreeNode(DirectoryTree.Node node, String prefix, boolean isLast) {
+    // NEW Helper for the above method
+    private void buildTreeString(DirectoryTree.Node node, String prefix, boolean isLast, StringBuilder sb) {
         String connector = isLast ? "└── " : "├── ";
         String icon = node.type == FileType.DIRECTORY ? "📁" : "📄";
 
@@ -840,7 +843,7 @@ public class FileSystem {
             String sizeInfo = node.type == FileType.DIRECTORY ?
                 "" : " (" + formatFileSize(nodeInode.getSize()) + ")";
 
-            System.out.println(prefix + connector + icon + " " + node.name + sizeInfo);
+            sb.append(prefix).append(connector).append(icon).append(" ").append(node.name).append(sizeInfo).append("\n");
 
             if (node.type == FileType.DIRECTORY && node.childNodes != null) {
                 Object[] children = node.childNodes.toArray();
@@ -848,12 +851,17 @@ public class FileSystem {
                     DirectoryTree.Node child = (DirectoryTree.Node) children[i];
                     boolean isLastChild = (i == children.length - 1);
                     String newPrefix = prefix + (isLast ? "    " : "│   ");
-                    printTreeNode(child, newPrefix, isLastChild);
+                    buildTreeString(child, newPrefix, isLastChild, sb);
                 }
             }
         } catch (IOException e) {
-            System.out.println(prefix + connector + "❌ " + node.name + " (Error reading)");
+            sb.append(prefix).append(connector).append("❌ ").append(node.name).append(" (Error reading)\n");
         }
+    }
+
+
+    public void showFileSystemTree() {
+        System.out.println(getFileSystemTreeAsString());
     }
 
     // --- Metode Getter untuk GUI ---

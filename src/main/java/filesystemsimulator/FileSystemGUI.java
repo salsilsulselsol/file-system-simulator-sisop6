@@ -4,13 +4,17 @@ import filesystemsimulator.exceptions.FileSystemException;
 import filesystemsimulator.filesystem.FileSystem;
 import filesystemsimulator.filestructures.data.DirectoryTree;
 import filesystemsimulator.filestructures.data.FileType;
+
 import javax.swing.*;
 import javax.swing.tree.*;
 import java.awt.*;
-import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.PrintStream;
+import java.awt.event.ActionListener;
+
 
 public class FileSystemGUI extends JFrame {
 
@@ -91,8 +95,9 @@ public class FileSystemGUI extends JFrame {
 
         directoryTreeComponent = new JTree();
         directoryTreeComponent.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
-        // PERBAIKAN: Menggunakan satu-satunya Cell Renderer yang benar
         directoryTreeComponent.setCellRenderer(new FileSystemCellRenderer());
+
+        // Listener to display file content on selection
         directoryTreeComponent.addTreeSelectionListener(e -> {
             TreePath selectedPath = e.getPath();
             if (selectedPath != null) {
@@ -107,15 +112,36 @@ public class FileSystemGUI extends JFrame {
             }
         });
 
+        // Add mouse listener for double-click navigation
+        directoryTreeComponent.addMouseListener(new MouseAdapter() {
+            public void mousePressed(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    TreePath selPath = directoryTreeComponent.getPathForLocation(e.getX(), e.getY());
+                    if (selPath != null) {
+                        Object lastComponent = selPath.getLastPathComponent();
+                        if (lastComponent instanceof DirectoryTree.Node selectedNode) {
+                            if (selectedNode.type == FileType.DIRECTORY) {
+                                // Only CD if it's a child, not the root of the current view
+                                if (selectedNode != directoryTreeComponent.getModel().getRoot()) {
+                                    executeCd(selectedNode.name);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
 
-        DirectoryTree.Node actualRootNode = getActualFileSystemRootNode();
-        if (actualRootNode != null) {
-            fileSystemTreeModel = new FileSystemTreeModel(actualRootNode);
+        // Initialize tree model with current directory
+        DirectoryTree.Node currentDirNode = fileSystem.tree.getCurrentDir();
+        if (currentDirNode != null) {
+            fileSystemTreeModel = new FileSystemTreeModel(currentDirNode);
             directoryTreeComponent.setModel(fileSystemTreeModel);
         } else {
             directoryTreeComponent.setModel(new DefaultTreeModel(new DefaultMutableTreeNode("File System Not Ready")));
             logMessage("Error: Could not get root node for JTree initialization.");
         }
+
 
         JScrollPane treeScrollPane = new JScrollPane(directoryTreeComponent);
         treeScrollPane.setMinimumSize(new Dimension(250, 100));
@@ -160,6 +186,13 @@ public class FileSystemGUI extends JFrame {
         topPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
         JPanel pathPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+
+        // NEW: Back button
+        JButton backButton = new JButton("⬅️ Back");
+        backButton.setToolTipText("Go to parent directory (cd ..)");
+        backButton.addActionListener(e -> executeCd(".."));
+        pathPanel.add(backButton);
+
         pathPanel.add(new JLabel("📁 Current Path: "));
         currentPathLabel = new JLabel();
         currentPathLabel.setFont(new Font("Monospaced", Font.BOLD, 12));
@@ -171,7 +204,12 @@ public class FileSystemGUI extends JFrame {
 
         JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
 
-        // PERBAIKAN UTAMA: Mengganti tombol agar lebih deskriptif
+        // NEW: Full Tree View button
+        JButton treeViewButton = new JButton("🌳 Full Tree");
+        treeViewButton.setToolTipText("Show the entire file system tree");
+        treeViewButton.addActionListener(e -> handleShowFullTree());
+        treeViewButton.setPreferredSize(new Dimension(110, 30));
+
         JButton quickMemoryButton = new JButton("📊 Memory");
         quickMemoryButton.setToolTipText("Show Memory and Storage Visualization");
         quickMemoryButton.setPreferredSize(new Dimension(110, 30));
@@ -181,6 +219,7 @@ public class FileSystemGUI extends JFrame {
         helpButton.setPreferredSize(new Dimension(80, 30));
         helpButton.addActionListener(e -> showHelpDialog());
 
+        rightPanel.add(treeViewButton);
         rightPanel.add(quickMemoryButton);
         rightPanel.add(helpButton);
 
@@ -189,6 +228,23 @@ public class FileSystemGUI extends JFrame {
         topPanel.add(rightPanel, BorderLayout.EAST);
 
         return topPanel;
+    }
+
+    // NEW: Handler for the "Full Tree" button
+    private void handleShowFullTree() {
+        try {
+            // This new method in FileSystem returns the tree as a single string
+            String treeString = fileSystem.getFileSystemTreeAsString();
+            JTextArea textArea = new JTextArea(treeString);
+            textArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
+            textArea.setEditable(false);
+            JScrollPane scrollPane = new JScrollPane(textArea);
+            scrollPane.setPreferredSize(new Dimension(500, 600));
+            JOptionPane.showMessageDialog(this, scrollPane, "🌳 Full File System Tree", JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception e) {
+            logMessage("Error generating full tree view: " + e.getMessage());
+            JOptionPane.showMessageDialog(this, "Could not display tree view: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     private void handleMemoryVisualization() {
@@ -276,6 +332,7 @@ public class FileSystemGUI extends JFrame {
 
 
     private void handleDetailedList() {
+        logMessage("> ls -la (Detailed List)");
         try {
             outputArea.append("=== 📋 Detailed Directory Listing ===\n");
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -295,6 +352,7 @@ public class FileSystemGUI extends JFrame {
     }
 
     private void handleDirectoryInfo() {
+        logMessage("> dirinfo (Directory Info)");
         try {
             outputArea.append("=== 📊 Directory Information ===\n");
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -313,8 +371,6 @@ public class FileSystemGUI extends JFrame {
         }
     }
 
-    // PERBAIKAN: Hanya ada SATU definisi kelas Cell Renderer.
-    // Nama kelas diubah menjadi FileSystemCellRenderer dan yang duplikat dihapus.
     private static class FileSystemCellRenderer extends DefaultTreeCellRenderer {
         private final Icon defaultClosedIcon;
         private final Icon defaultOpenIcon;
@@ -333,7 +389,10 @@ public class FileSystemGUI extends JFrame {
             super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
 
             if (value instanceof DirectoryTree.Node node) {
+                // For the root of the tree view (which is the current directory), show its name
+                // For children, show their names.
                 setText(getEnhancedNodeText(node));
+
                 if (node.type == FileType.DIRECTORY) {
                     setIcon(expanded ? defaultOpenIcon : defaultClosedIcon);
                     if (!sel) {
@@ -383,12 +442,14 @@ public class FileSystemGUI extends JFrame {
 
 
     private void logMessage(String message) {
+        // Prepend "> " to user commands for clarity
+        String finalMessage = message.startsWith(">") ? message : "  " + message;
         if (SwingUtilities.isEventDispatchThread()) {
-            outputArea.append(message + "\n");
+            outputArea.append(finalMessage + "\n");
             outputArea.setCaretPosition(outputArea.getDocument().getLength());
         } else {
             SwingUtilities.invokeLater(() -> {
-                outputArea.append(message + "\n");
+                outputArea.append(finalMessage + "\n");
                 outputArea.setCaretPosition(outputArea.getDocument().getLength());
             });
         }
@@ -419,16 +480,6 @@ public class FileSystemGUI extends JFrame {
         }
     }
 
-    private void expandAllNodes(JTree tree, int startingIndex, int rowCount) {
-        for (int i = startingIndex; i < rowCount; ++i) {
-            tree.expandRow(i);
-        }
-
-        if (tree.getRowCount() != rowCount) {
-            expandAllNodes(tree, rowCount, tree.getRowCount());
-        }
-    }
-
     private void updateCurrentPathLabel() {
         if (fileSystem != null) {
             currentPathLabel.setText(fileSystem.getCurrentPath());
@@ -437,15 +488,16 @@ public class FileSystemGUI extends JFrame {
         }
     }
 
+    // MODIFIED: This now updates the tree to show the current directory's contents
     private void updateDirectoryTreeDisplay() {
         if (fileSystem != null && fileSystem.tree != null && fileSystemTreeModel != null) {
-            DirectoryTree.Node currentTreeRoot = getActualFileSystemRootNode();
-            fileSystemTreeModel.updateTreeStructure(currentTreeRoot);
+            DirectoryTree.Node currentDirectoryNode = fileSystem.tree.getCurrentDir();
+            fileSystemTreeModel.updateTreeStructure(currentDirectoryNode);
 
+            // Expand the root of the view (the current directory) to show its children
             if (directoryTreeComponent.getRowCount() > 0) {
                 directoryTreeComponent.expandRow(0);
-                assert currentTreeRoot != null;
-                directoryTreeComponent.setSelectionPath(new TreePath(currentTreeRoot));
+                directoryTreeComponent.setSelectionPath(new TreePath(currentDirectoryNode));
             }
         } else {
             logMessage("Cannot update tree: FileSystem or TreeModel not ready.");
@@ -458,6 +510,7 @@ public class FileSystemGUI extends JFrame {
         PrintStream oldOut = System.out;
         System.setOut(ps);
         try {
+            logMessage("> cat " + fileName);
             fileSystem.printFile(fileName);
             System.out.flush();
             fileContentArea.setText(baos.toString());
@@ -512,6 +565,7 @@ public class FileSystemGUI extends JFrame {
     private void handleMkdir() {
         String dirName = JOptionPane.showInputDialog(this, "Enter directory name:", "mkdir", JOptionPane.PLAIN_MESSAGE);
         if (dirName != null && !dirName.trim().isEmpty()) {
+            logMessage("> mkdir " + dirName);
             try {
                 fileSystem.makeFile(dirName, FileType.DIRECTORY);
                 logMessage("Directory '" + dirName + "' created.");
@@ -524,6 +578,7 @@ public class FileSystemGUI extends JFrame {
     }
 
     private void handleLs() {
+        logMessage("> ls");
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         PrintStream ps = new PrintStream(baos);
         PrintStream oldOut = System.out;
@@ -535,24 +590,32 @@ public class FileSystemGUI extends JFrame {
         updateAllUIElements();
     }
 
+    // NEW: Centralized method to handle changing directories and updating the UI
+    private void executeCd(String path) {
+        if(path == null || path.trim().isEmpty()) return;
+        logMessage("> cd " + path);
+        try {
+            fileSystem.changeDir(path);
+            logMessage("Changed directory to: " + fileSystem.getCurrentPath());
+            updateAllUIElements(); // This will refresh the tree view
+        } catch (FileSystemException e) {
+            logMessage("Error cd: " + e.getMessage());
+            JOptionPane.showMessageDialog(this, "Error changing directory: " + e.getMessage(), "Cd Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    // MODIFIED: Uses the new centralized CD method
     private void handleCd() {
         String path = JOptionPane.showInputDialog(this, "Enter path to change directory to (e.g., dirname, ../, /):", "cd", JOptionPane.PLAIN_MESSAGE);
         if (path != null && !path.trim().isEmpty()) {
-            try {
-                fileSystem.changeDir(path);
-                logMessage("Changed directory to: " + fileSystem.getCurrentPath());
-                updateAllUIElements();
-            } catch (FileSystemException e) {
-                logMessage("Error cd: " + e.getMessage());
-                JOptionPane.showMessageDialog(this, "Error changing directory: " + e.getMessage(), "Cd Error", JOptionPane.ERROR_MESSAGE);
-            }
+            executeCd(path);
         }
     }
 
     private void handleCat() {
         String fileName = JOptionPane.showInputDialog(this, "Enter file name to display content:", "cat", JOptionPane.PLAIN_MESSAGE);
         if (fileName != null && !fileName.trim().isEmpty()) {
-            displayFileContent(fileName);
+            displayFileContent(fileName); // displayFileContent already logs the command
         }
     }
 
@@ -586,6 +649,7 @@ public class FileSystemGUI extends JFrame {
             boolean append = appendCheckBox.isSelected();
 
             if (fileName != null && !fileName.trim().isEmpty()) {
+                logMessage("> write " + (append ? "+append " : "") + fileName + " \"...\"");
                 try {
                     if (append) {
                         fileSystem.appendToFile(fileName, content.getBytes());
@@ -610,6 +674,7 @@ public class FileSystemGUI extends JFrame {
         if (fileName != null && !fileName.trim().isEmpty()) {
             int confirmation = JOptionPane.showConfirmDialog(this, "Are you sure you want to remove file '" + fileName + "'?", "Confirm Remove File", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
             if (confirmation == JOptionPane.YES_OPTION) {
+                logMessage("> rm " + fileName);
                 try {
                     fileSystem.deleteFile(fileName);
                     logMessage("File '" + fileName + "' removed.");
@@ -629,6 +694,7 @@ public class FileSystemGUI extends JFrame {
             JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
 
         if (confirmation == JOptionPane.YES_OPTION) {
+            logMessage("> rmdir");
             try {
                 String oldPath = fileSystem.getCurrentPath();
                 fileSystem.removeDir();
@@ -662,6 +728,7 @@ public class FileSystemGUI extends JFrame {
             String sourceName = sourceField.getText();
             String destName = destField.getText();
             if (sourceName != null && !sourceName.trim().isEmpty() && destName != null && !destName.trim().isEmpty()) {
+                logMessage("> cp " + sourceName + " " + destName);
                 try {
                     fileSystem.copyFile(sourceName, destName);
                     logMessage("File '" + sourceName + "' copied to '" + destName + "'.");
@@ -716,6 +783,7 @@ public class FileSystemGUI extends JFrame {
             String destFileName = destFileNameField.getText();
 
             if (extPath != null && !extPath.trim().isEmpty() && destFileName != null && !destFileName.trim().isEmpty()) {
+                logMessage("> import " + extPath + " " + destFileName);
                 try {
                     fileSystem.importFile(extPath, destFileName);
                     logMessage("File '" + extPath + "' imported as '" + destFileName + "'.");
@@ -769,6 +837,7 @@ public class FileSystemGUI extends JFrame {
             String fileName = fileNameField.getText();
             String extPath = extPathField.getText();
             if (fileName != null && !fileName.trim().isEmpty() && extPath != null && !extPath.trim().isEmpty()) {
+                logMessage("> export " + fileName + " " + extPath);
                 try {
                     fileSystem.exportFile(fileName, extPath);
                     logMessage("File '" + fileName + "' exported to '" + extPath + "'.");
@@ -804,6 +873,7 @@ public class FileSystemGUI extends JFrame {
             String destPath = destPathField.getText();
 
             if (sourcePath != null && !sourcePath.trim().isEmpty() && destPath != null && !destPath.trim().isEmpty()) {
+                logMessage("> mv " + sourcePath + " " + destPath);
                 try {
                     fileSystem.moveItem(sourcePath, destPath);
                     logMessage("Item '" + sourcePath + "' moved to '" + destPath + "'.");
