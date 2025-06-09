@@ -9,6 +9,7 @@ import java.io.RandomAccessFile;
 public class SuperBlock {
 
 	static final int BYTES_TAKEN_IN_FILE = 30;
+	static final int SUPER_BLOCK_SIZE = 512;
 
 	short blockSize;
 	int totalBlockCount;
@@ -17,6 +18,10 @@ public class SuperBlock {
 	int dataBitmapOffset;
 	int inodeBlockOffset;
 	int dataBlockOffset;
+
+	// Tambahkan field yang hilang
+    int inodeCount;
+    int dataBlockCount;
 
 	public SuperBlock() {
 		blockSize = 512;
@@ -38,6 +43,29 @@ public class SuperBlock {
 		file.writeInt(dataBlockOffset);
 		file.skipBytes(512 - BYTES_TAKEN_IN_FILE);
 	}
+
+	public int getInodeBitmapSize() {
+        // Calculate bitmap size needed for inodes
+        return (inodeCount + 7) / 8; // Round up to nearest byte
+    }
+
+	public long getDataBlockBitmapOffset() {
+        // Offset comes after superblock and inode bitmap
+        return dataBitmapOffset;
+    }
+
+    public int getDataBlockBitmapSize() {
+        // Calculate bitmap size needed for data blocks
+        return (dataBlockCount + 7) / 8; // Round up to nearest byte
+    }
+
+	public int getInodeCount() {
+        return inodeCount;
+    }
+
+    public int getDataBlockCount() {
+        return dataBlockCount;
+    }
 
 	public short getBlockSize() {
 		return blockSize;
@@ -77,17 +105,21 @@ public class SuperBlock {
 	/**
 	 * Calculates the offsets of the super block.
 	 */
-	private void calculateOffsets() {
-		int dataBlockCount = (int) Math.ceil(maxSizeBytes / 512.0);
-		int maxFileCount = (int) Math.ceil(dataBlockCount / 56.0);
-		short superBlockCount = 1;
-		int inodeBitmapBlockCount = (int) Math.ceil(maxFileCount / 4096.0);
-		int dataBitmapBlockCount = (int) Math.ceil(dataBlockCount / 4096.0);
-		int inodeBlockCount = inodeBitmapBlockCount * 4096 / 2;
-		totalBlockCount = superBlockCount + inodeBitmapBlockCount +
-				dataBitmapBlockCount + inodeBlockCount + dataBlockCount;
-		setOffsets(inodeBitmapBlockCount, dataBitmapBlockCount, inodeBlockCount);
-	}
+    private void calculateOffsets() {
+        // Perbaiki perhitungan untuk memberikan lebih banyak inode
+        dataBlockCount = (int) Math.ceil(maxSizeBytes / 512.0);
+        int maxFileCount = Math.max(100, (int) Math.ceil(dataBlockCount / 10.0)); // Minimal 100 inode
+        inodeCount = maxFileCount;
+        
+        short superBlockCount = 1;
+        int inodeBitmapBlockCount = (int) Math.ceil(maxFileCount / 4096.0);
+        int dataBitmapBlockCount = (int) Math.ceil(dataBlockCount / 4096.0);
+        int inodeBlockCount = (int) Math.ceil(maxFileCount * 64.0 / 512.0); // 64 bytes per inode
+        
+        totalBlockCount = superBlockCount + inodeBitmapBlockCount +
+                dataBitmapBlockCount + inodeBlockCount + dataBlockCount;
+        setOffsets(inodeBitmapBlockCount, dataBitmapBlockCount, inodeBlockCount);
+    }
 
 	/**
 	 * Sets the offsets of the super block.

@@ -96,4 +96,40 @@ public class BlockAllocator {
             writeBitmapFromBuffer(freeBitmapBlock, superBlock.getDataBitmapOffset(), i);
         }
     }
+
+    // ...existing code...
+
+    public int getUsedInodeCount() throws FileSystemException {
+        try {
+            int count = 0;
+            containerFile.seek(superBlock.getInodeBitmapOffset());
+            byte[] inodeBitmap = new byte[superBlock.getInodeBitmapSize()];
+            containerFile.readFully(inodeBitmap);
+            
+            for (byte b : inodeBitmap) {
+                count += Integer.bitCount(b & 0xFF);
+            }
+            return count;
+        } catch (IOException e) {
+            throw new FileSystemException("Error reading inode bitmap: " + e.getMessage(), e);
+        }
+    }
+
+    public int getUsedDataBlockCount() throws FileSystemException {
+        try {
+            int count = 0;
+            containerFile.seek(superBlock.getDataBlockBitmapOffset());
+            byte[] dataBlockBitmap = new byte[superBlock.getDataBlockBitmapSize()];
+            containerFile.readFully(dataBlockBitmap);
+            
+            for (byte b : dataBlockBitmap) {
+                count += Integer.bitCount(b & 0xFF);
+            }
+            return count;
+        } catch (IOException e) {
+            throw new FileSystemException("Error reading data block bitmap: " + e.getMessage(), e);
+        }
+    }
+
+// ...existing code...
 }

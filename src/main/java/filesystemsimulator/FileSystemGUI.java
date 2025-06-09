@@ -84,19 +84,20 @@ public class FileSystemGUI extends JFrame {
         setLayout(new BorderLayout(5, 5)); // Tambahkan sedikit jarak antar komponen BorderLayout
 
         // Top Panel: Current Path and Help Button
-        JPanel topPanel = new JPanel(new BorderLayout());
-        currentPathLabel = new JLabel();
-        JPanel pathPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        pathPanel.add(new JLabel("Current Path: "));
-        pathPanel.add(currentPathLabel);
-        topPanel.add(pathPanel, BorderLayout.CENTER);
+        // JPanel topPanel = new JPanel(new BorderLayout());
+        // currentPathLabel = new JLabel();
+        // JPanel pathPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        // pathPanel.add(new JLabel("Current Path: "));
+        // pathPanel.add(currentPathLabel);
+        // topPanel.add(pathPanel, BorderLayout.CENTER);
 
-        JButton helpButton = new JButton("Help");
-        helpButton.addActionListener(e -> showHelpDialog());
-        JPanel helpButtonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        helpButtonPanel.add(helpButton);
-        topPanel.add(helpButtonPanel, BorderLayout.EAST);
+        // JButton helpButton = new JButton("Help");
+        // helpButton.addActionListener(e -> showHelpDialog());
+        // JPanel helpButtonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        // helpButtonPanel.add(helpButton);
+        // topPanel.add(helpButtonPanel, BorderLayout.EAST);
 
+        JPanel topPanel = createEnhancedTopPanel();
         add(topPanel, BorderLayout.NORTH);
 
 
@@ -169,6 +170,50 @@ public class FileSystemGUI extends JFrame {
         logMessage("File system initialized. GUI is ready.");
     }
 
+        private JPanel createEnhancedTopPanel() {
+        JPanel topPanel = new JPanel(new BorderLayout());
+        topPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        
+        // Left side: Path info
+        JPanel pathPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        pathPanel.add(new JLabel("📁 Current Path: "));
+        currentPathLabel = new JLabel();
+        currentPathLabel.setFont(new Font("Monospaced", Font.BOLD, 12));
+        currentPathLabel.setForeground(new Color(0, 100, 200));
+        pathPanel.add(currentPathLabel);
+        
+        // Center: Quick stats (will be updated dynamically)
+        JLabel statsLabel = new JLabel("💾 Ready");
+        statsLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        
+        // Right side: Help and quick action buttons
+        JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        
+        JButton quickMemoryButton = new JButton("💾");
+        quickMemoryButton.setToolTipText("Quick Memory View");
+        quickMemoryButton.setPreferredSize(new Dimension(35, 25));
+        quickMemoryButton.addActionListener(e -> handleMemoryVisualization());
+        
+        JButton quickTreeButton = new JButton("🌳");
+        quickTreeButton.setToolTipText("Quick Tree View");
+        quickTreeButton.setPreferredSize(new Dimension(35, 25));
+        quickTreeButton.addActionListener(e -> handleTreeView());
+        
+        JButton helpButton = new JButton("❓ Help");
+        helpButton.addActionListener(e -> showHelpDialog());
+        
+        rightPanel.add(quickMemoryButton);
+        rightPanel.add(quickTreeButton);
+        rightPanel.add(helpButton);
+        
+        topPanel.add(pathPanel, BorderLayout.WEST);
+        topPanel.add(statsLabel, BorderLayout.CENTER);
+        topPanel.add(rightPanel, BorderLayout.EAST);
+        
+        return topPanel;
+    }
+
+
     private DirectoryTree.Node getActualFileSystemRootNode() {
         if (fileSystem != null && fileSystem.tree != null) {
             return fileSystem.tree.root; // Asumsi 'root' adalah public atau ada getter
@@ -193,6 +238,18 @@ public class FileSystemGUI extends JFrame {
         JButton lsButton = new JButton("ls (to log)");
         setupButton(lsButton, buttonSize, panel, rigidArea);
         lsButton.addActionListener(e -> handleLs());
+
+        // NEW: Enhanced listing button
+        JButton detailedListButton = new JButton("📋 Detailed List");
+        detailedListButton.setBackground(new Color(230, 240, 255));
+        setupButton(detailedListButton, buttonSize, panel, rigidArea);
+        detailedListButton.addActionListener(e -> handleDetailedList());
+
+        // NEW: Directory info button
+        JButton dirInfoButton = new JButton("📊 Dir Info");
+        dirInfoButton.setBackground(new Color(255, 240, 230));
+        setupButton(dirInfoButton, buttonSize, panel, rigidArea);
+        dirInfoButton.addActionListener(e -> handleDirectoryInfo());
 
         JButton cdButton = new JButton("cd");
         setupButton(cdButton, buttonSize, panel, rigidArea);
@@ -222,6 +279,18 @@ public class FileSystemGUI extends JFrame {
         setupButton(cpButton, buttonSize, panel, rigidArea);
         cpButton.addActionListener(e -> handleCp());
 
+        // NEW: Memory visualization button
+        JButton memoryButton = new JButton("💾 Memory");
+        memoryButton.setBackground(new Color(240, 255, 240));
+        setupButton(memoryButton, buttonSize, panel, rigidArea);
+        memoryButton.addActionListener(e -> handleMemoryVisualization());
+
+        // NEW: Tree view button
+        JButton treeViewButton = new JButton("🌳 Tree View");
+        treeViewButton.setBackground(new Color(255, 250, 240));
+        setupButton(treeViewButton, buttonSize, panel, rigidArea);
+        treeViewButton.addActionListener(e -> handleTreeView());
+
         JButton importButton = new JButton("import");
         setupButton(importButton, buttonSize, panel, rigidArea);
         importButton.addActionListener(e -> handleImport());
@@ -232,6 +301,247 @@ public class FileSystemGUI extends JFrame {
 
         return panel;
     }
+
+    // NEW: Handler for detailed directory listing
+    private void handleDetailedList() {
+        try {
+            outputArea.append("=== 📋 Detailed Directory Listing ===\n");
+            
+            // Redirect System.out to capture the output
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            PrintStream ps = new PrintStream(baos);
+            PrintStream oldOut = System.out;
+            System.setOut(ps);
+            
+            fileSystem.listCurrentDirDetailed();
+            
+            System.out.flush();
+            System.setOut(oldOut);
+            
+            outputArea.append(baos.toString());
+            outputArea.append("\n");
+            outputArea.setCaretPosition(outputArea.getDocument().getLength());
+            
+        } catch (Exception ex) {
+            outputArea.append("Error: " + ex.getMessage() + "\n");
+            outputArea.setCaretPosition(outputArea.getDocument().getLength());
+        }
+    }
+
+    // NEW: Handler for directory information
+    private void handleDirectoryInfo() {
+        try {
+            outputArea.append("=== 📊 Directory Information ===\n");
+            
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            PrintStream ps = new PrintStream(baos);
+            PrintStream oldOut = System.out;
+            System.setOut(ps);
+            
+            fileSystem.showDirectoryInfo();
+            
+            System.out.flush();
+            System.setOut(oldOut);
+            
+            outputArea.append(baos.toString());
+            outputArea.append("\n");
+            outputArea.setCaretPosition(outputArea.getDocument().getLength());
+            
+        } catch (Exception ex) {
+            outputArea.append("Error: " + ex.getMessage() + "\n");
+            outputArea.setCaretPosition(outputArea.getDocument().getLength());
+        }
+    }
+
+    // NEW: Handler for memory visualization
+    private void handleMemoryVisualization() {
+        try {
+            // Show in a separate dialog window for better visualization
+            JDialog memoryDialog = new JDialog(this, "💾 Memory Visualization", true);
+            memoryDialog.setSize(600, 500);
+            memoryDialog.setLocationRelativeTo(this);
+            
+            JTextArea memoryArea = new JTextArea();
+            memoryArea.setEditable(false);
+            memoryArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
+            memoryArea.setBackground(new Color(248, 248, 248));
+            
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            PrintStream ps = new PrintStream(baos);
+            PrintStream oldOut = System.out;
+            System.setOut(ps);
+            
+            fileSystem.showMemoryVisualization();
+            
+            System.out.flush();
+            System.setOut(oldOut);
+            
+            memoryArea.setText(baos.toString());
+            
+            JScrollPane scrollPane = new JScrollPane(memoryArea);
+            memoryDialog.add(scrollPane, BorderLayout.CENTER);
+            
+            // Add refresh button
+            JPanel buttonPanel = new JPanel(new FlowLayout());
+            JButton refreshButton = new JButton("🔄 Refresh");
+            refreshButton.addActionListener(e -> {
+                try {
+                    ByteArrayOutputStream baos2 = new ByteArrayOutputStream();
+                    PrintStream ps2 = new PrintStream(baos2);
+                    PrintStream oldOut2 = System.out;
+                    System.setOut(ps2);
+                    
+                    fileSystem.showMemoryVisualization();
+                    
+                    System.out.flush();
+                    System.setOut(oldOut2);
+                    
+                    memoryArea.setText(baos2.toString());
+                } catch (Exception ex) {
+                    memoryArea.setText("Error refreshing: " + ex.getMessage());
+                }
+            });
+            buttonPanel.add(refreshButton);
+            memoryDialog.add(buttonPanel, BorderLayout.SOUTH);
+            
+            memoryDialog.setVisible(true);
+            
+            // Also log to main output
+            outputArea.append("=== 💾 Memory Visualization (also shown in dialog) ===\n");
+            outputArea.append(baos.toString());
+            outputArea.append("\n");
+            outputArea.setCaretPosition(outputArea.getDocument().getLength());
+            
+        } catch (Exception ex) {
+            outputArea.append("Error: " + ex.getMessage() + "\n");
+            outputArea.setCaretPosition(outputArea.getDocument().getLength());
+        }
+    }
+
+    // NEW: Handler for tree view
+    private void handleTreeView() {
+        try {
+            // Show tree view in a separate dialog
+            JDialog treeDialog = new JDialog(this, "🌳 File System Tree View", true);
+            treeDialog.setSize(500, 600);
+            treeDialog.setLocationRelativeTo(this);
+            
+            JTextArea treeArea = new JTextArea();
+            treeArea.setEditable(false);
+            treeArea.setFont(new Font("Monospaced", Font.PLAIN, 11));
+            treeArea.setBackground(new Color(250, 255, 250));
+            
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            PrintStream ps = new PrintStream(baos);
+            PrintStream oldOut = System.out;
+            System.setOut(ps);
+            
+            fileSystem.showFileSystemTree();
+            
+            System.out.flush();
+            System.setOut(oldOut);
+            
+            treeArea.setText(baos.toString());
+            
+            JScrollPane scrollPane = new JScrollPane(treeArea);
+            treeDialog.add(scrollPane, BorderLayout.CENTER);
+            
+            // Add expand/collapse controls
+            JPanel controlPanel = new JPanel(new FlowLayout());
+            JButton refreshTreeButton = new JButton("🔄 Refresh Tree");
+            refreshTreeButton.addActionListener(e -> {
+                try {
+                    ByteArrayOutputStream baos2 = new ByteArrayOutputStream();
+                    PrintStream ps2 = new PrintStream(baos2);
+                    PrintStream oldOut2 = System.out;
+                    System.setOut(ps2);
+                    
+                    fileSystem.showFileSystemTree();
+                    
+                    System.out.flush();
+                    System.setOut(oldOut2);
+                    
+                    treeArea.setText(baos2.toString());
+                    updateDirectoryTreeDisplay(); // Also refresh main tree
+                } catch (Exception ex) {
+                    treeArea.setText("Error refreshing tree: " + ex.getMessage());
+                }
+            });
+            controlPanel.add(refreshTreeButton);
+            treeDialog.add(controlPanel, BorderLayout.SOUTH);
+            
+            treeDialog.setVisible(true);
+            
+            // Also log to main output
+            outputArea.append("=== 🌳 File System Tree (also shown in dialog) ===\n");
+            outputArea.append(baos.toString());
+            outputArea.append("\n");
+            outputArea.setCaretPosition(outputArea.getDocument().getLength());
+            
+        } catch (Exception ex) {
+            outputArea.append("Error: " + ex.getMessage() + "\n");
+            outputArea.setCaretPosition(outputArea.getDocument().getLength());
+        }
+    }
+
+    private static class EnhancedFileSystemCellRenderer extends DefaultTreeCellRenderer {
+        private final Icon defaultClosedIcon;
+        private final Icon defaultOpenIcon;
+        private final Icon defaultLeafIcon;
+
+        public EnhancedFileSystemCellRenderer() {
+            defaultClosedIcon = UIManager.getIcon("Tree.closedIcon");
+            defaultOpenIcon = UIManager.getIcon("Tree.openIcon");
+            defaultLeafIcon = UIManager.getIcon("Tree.leafIcon");
+        }
+
+        @Override
+        public Component getTreeCellRendererComponent(JTree tree, Object value,
+                                                      boolean sel, boolean expanded,
+                                                      boolean leaf, int row, boolean hasFocus) {
+            super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
+            
+            if (value instanceof DirectoryTree.Node node) {
+                setText(getEnhancedNodeText(node));
+                
+                if (node.type == FileType.DIRECTORY) {
+                    setIcon(expanded ? defaultOpenIcon : defaultClosedIcon);
+                    if (!sel) {
+                        setForeground(new Color(0, 100, 200)); // Blue for directories
+                    }
+                } else {
+                    setIcon(defaultLeafIcon);
+                    if (!sel) {
+                        setForeground(getFileColor(node.name)); // Different colors for different file types
+                    }
+                }
+            } else {
+                setIcon(defaultLeafIcon);
+            }
+            return this;
+        }
+        
+        private String getEnhancedNodeText(DirectoryTree.Node node) {
+            String icon = node.type == FileType.DIRECTORY ? "📁" : "📄";
+            return icon + " " + node.name;
+        }
+
+        private Color getFileColor(String fileName) {
+            String lowerName = fileName.toLowerCase();
+            if (lowerName.endsWith(".txt") || lowerName.endsWith(".md")) {
+                return new Color(100, 100, 100); // Gray for text files
+            } else if (lowerName.endsWith(".java") || lowerName.endsWith(".py") || lowerName.endsWith(".js")) {
+                return new Color(0, 150, 0); // Green for code files
+            } else if (lowerName.endsWith(".jpg") || lowerName.endsWith(".png") || lowerName.endsWith(".gif")) {
+                return new Color(150, 0, 150); // Purple for images
+            } else if (lowerName.endsWith(".exe") || lowerName.endsWith(".bin")) {
+                return new Color(200, 0, 0); // Red for executables
+            } else {
+                return new Color(150, 100, 0); // Brown for other files
+            }
+        }
+    }
+
     private void setupButton(JButton button, Dimension size, Container container, Component spacer) {
         button.setPreferredSize(size);
         button.setMinimumSize(size);

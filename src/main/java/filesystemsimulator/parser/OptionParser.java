@@ -77,11 +77,78 @@ public class OptionParser {
 			case "write" -> write(args);
 			case "import" -> importFile(args);
 			case "export" -> exportFile(args);
+			// NEW: Enhanced commands
+            case "lsl", "ll" -> lsDetailed();
+            case "info", "dirinfo" -> showDirectoryInfo();
+            case "mem", "memory" -> showMemoryVisualization();
+            case "tree" -> showFileSystemTree();
+            case "mv", "move" -> move(args);
 			case "exit" -> exit = true;
 			default -> System.out.println("ERROR - Invalid command");
 		}
 		return exit;
 	}
+
+	    // NEW: Enhanced listing command
+    /**
+     * Lists the content of the current directory with detailed information.
+     */
+    private void lsDetailed() {
+        try {
+            fileSystem.listCurrentDirDetailed();
+        } catch (FileSystemException e) {
+            printError(e);
+        }
+    }
+
+	// NEW: Directory information command
+    /**
+     * Shows detailed information about the current directory.
+     */
+    private void showDirectoryInfo() {
+        try {
+            fileSystem.showDirectoryInfo();
+        } catch (FileSystemException e) {
+            printError(e);
+        }
+    }
+
+	// NEW: Memory visualization command
+    /**
+     * Shows memory usage visualization and statistics.
+     */
+    private void showMemoryVisualization() {
+        try {
+            fileSystem.showMemoryVisualization();
+        } catch (FileSystemException e) {
+            printError(e);
+        }
+    }
+
+	private void showFileSystemTree() {
+        fileSystem.showFileSystemTree();
+    }
+
+	// NEW: Move/rename command
+    /**
+     * Moves or renames a file/directory.
+     * @param args the command's arguments.
+     */
+    private void move(String[] args) {
+        if (args.length < 3) {
+            printArgsError("mv");
+            return;
+        }
+        try {
+            // Use existing copy and delete functionality for move operation
+            fileSystem.copyFile(args[1], args[2]);
+            fileSystem.deleteFile(args[1]);
+            System.out.println("Moved '" + args[1] + "' to '" + args[2] + "'");
+        } catch (FileSystemException e) {
+            printError(e);
+        }
+    }
+
 
 	/**
 	 * Creates a directory in the file system.
@@ -255,9 +322,51 @@ public class OptionParser {
 	/**
 	 * Prints the usages of all available commands.
 	 */
-	private void printHelp() {
-		Command.printCommandUsages();
-	}
+private void printHelp() {
+        System.out.println("📚 Available Commands:");
+        System.out.println("═══════════════════════════════════════════════════════════════");
+
+        // Basic file operations
+        System.out.println("\n📁 Basic File Operations:");
+        System.out.println("  mkdir <directory_name> - Creates a new directory");
+        System.out.println("  rmdir - Removes the current directory if empty");
+        System.out.println("  rm <filename> - Removes a file");
+        System.out.println("  mv <source> <destination> - 📁 Moves or renames a file/directory");
+        System.out.println("  cp <source> <destination> - Copies a file");
+
+        // Navigation and listing
+        System.out.println("\n🧭 Navigation & Listing:");
+        System.out.println("  cd <path> - Changes to specified directory");
+        System.out.println("  ls - Lists contents of current directory");
+        System.out.println("  lsl | ll - 📋 Lists directory contents with detailed information");
+        System.out.println("  info | dirinfo - 📊 Shows detailed information about current directory");
+        System.out.println("  tree - 🌳 Shows file system structure as a tree");
+        // File content operations
+        System.out.println("\n📄 File Content:");
+        System.out.println("  cat <filename> - Displays file contents");
+        System.out.println("  write [+append] <filename> <content> - Writes content to file");
+
+        // Import/Export
+        System.out.println("\n🔄 Import/Export:");
+        System.out.println("  import [+append] <external_path> <internal_name> [append_text] - Imports file from external system");
+        System.out.println("  export <internal_name> <external_path> - Exports file to external system");
+
+        // System information
+        System.out.println("\n💾 System Information:");
+        System.out.println("  mem | memory - 💾 Shows memory usage visualization");
+
+        // Help and exit
+        System.out.println("\n❓ Help & Control:");
+        System.out.println("  help - Shows this help information");
+        System.out.println("  exit - Exits the file system simulator");
+
+        System.out.println("\n═══════════════════════════════════════════════════════════════");
+        System.out.println("💡 Tips:");
+        System.out.println("  • Use quotes for names with spaces: mkdir \"my folder\"");
+        System.out.println("  • Path separators: use / for navigation");
+        System.out.println("  • Special paths: cd .. (parent), cd / (root)");
+        System.out.println("  • Visual commands show enhanced information with emojis and colors");
+    }
 
 	/**
 	 * Prints an error message.
@@ -273,8 +382,19 @@ public class OptionParser {
 	 * @param commandName the name of the command.
 	 */
 	private void printArgsError(String commandName) {
-		if (Command.exists(commandName))
-			System.out.println("ERROR - Not enough arguments provided! "
-					+ "Usage: " + Command.usageOf(commandName));
-	}
+        System.out.print("ERROR - Not enough arguments provided! Usage: ");
+
+        switch (commandName) {
+            case "mkdir" -> System.out.println("mkdir <directory_name>");
+            case "cd" -> System.out.println("cd <path>");
+            case "cp" -> System.out.println("cp <source> <destination>");
+            case "rm" -> System.out.println("rm <filename>");
+            case "cat" -> System.out.println("cat <filename>");
+            case "write" -> System.out.println("write [+append] <filename> <content>");
+            case "import" -> System.out.println("import [+append] <external_path> <internal_name> [append_text]");
+            case "export" -> System.out.println("export <internal_name> <external_path>");
+            case "mv", "move" -> System.out.println("mv <source> <destination>");
+            default -> System.out.println(commandName + " (unknown command)");
+        }
+    }
 }

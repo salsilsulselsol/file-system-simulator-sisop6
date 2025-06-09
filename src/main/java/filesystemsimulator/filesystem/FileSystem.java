@@ -601,4 +601,309 @@ public class FileSystem {
         if (amountOfBytes == 0) return 0;
         return (int) Math.ceil((float) amountOfBytes / superBlock.getBlockSize());
     }
+
+    // ...existing code...
+
+    public void showDirectoryInfo() throws FileSystemException {
+        DirectoryTree.Node current = tree.getCurrentDir();
+        try {
+            IndexNode currentInode = inodeManager.readNode(current.inodeNumber);
+            int totalItems = 0;
+            int totalFiles = 0;
+            int totalFolders = 0;
+            long totalSize = 0;
+
+            System.out.println("📁 Directory Information: " + current.name);
+            System.out.println("└─ Path: " + getCurrentPath());
+            System.out.println("└─ Inode: " + current.inodeNumber);
+            System.out.println();
+
+            if (current.childNodes != null) {
+                Object[] children = current.childNodes.toArray();
+                totalItems = children.length;
+
+                for (Object childObj : children) {
+                    DirectoryTree.Node childNode = (DirectoryTree.Node) childObj;
+                    IndexNode childInode = inodeManager.readNode(childNode.inodeNumber);
+
+                    if (childNode.type == FileType.DIRECTORY) {
+                        totalFolders++;
+                        // For directories, calculate size recursively
+                        totalSize += calculateDirectorySize(childNode);
+                    } else {
+                        totalFiles++;
+                        totalSize += childInode.getSize();
+                    }
+                }
+            }
+
+            System.out.println("📊 Summary:");
+            System.out.println("   Total Items: " + totalItems);
+            System.out.println("   📁 Folders: " + totalFolders);
+            System.out.println("   📄 Files: " + totalFiles);
+            System.out.println("   💾 Total Size: " + formatFileSize(totalSize));
+            System.out.println();
+
+        } catch (IOException e) {
+            throw new FileSystemException("I/O error reading directory info: " + e.getMessage(), e);
+        }
+    }
+
+    public void listCurrentDirDetailed() throws FileSystemException {
+        DirectoryTree.Node current = tree.getCurrentDir();
+        System.out.println("📁 " + current.name + "$ ls -la:");
+        System.out.println("┌────────────────────────────────────────────────────────────┐");
+        System.out.printf("│ %-8s │ %-20s │ %-12s │ %-8s │%n", "Type", "Name", "Size", "Inode");
+        System.out.println("├────────────────────────────────────────────────────────────┤");
+
+        // Show parent directory if not root
+        if (current != tree.root && current.parent != null) {
+            System.out.printf("│ %-8s │ %-20s │ %-12s │ %-8s │%n",
+                "📁 DIR", "..", "<DIR>", "");
+        }
+
+        try {
+            if (current.childNodes != null) {
+                Object[] children = current.childNodes.toArray();
+                for (Object childObj : children) {
+                    DirectoryTree.Node childNode = (DirectoryTree.Node) childObj;
+                    IndexNode childInode = inodeManager.readNode(childNode.inodeNumber);
+
+                    String typeIcon = childNode.type == FileType.DIRECTORY ? "📁 DIR" : "📄 FILE";
+                    String sizeStr = childNode.type == FileType.DIRECTORY ?
+                        "<DIR>" : formatFileSize(childInode.getSize());
+
+                    String nameWithColor = getColoredName(childNode.name, childNode.type);
+
+                    System.out.printf("│ %-8s │ %-20s │ %-12s │ %-8d │%n",
+                        typeIcon, nameWithColor, sizeStr, childNode.inodeNumber);
+                }
+            }
+        } catch (IOException e) {
+            throw new FileSystemException("I/O error reading directory details: " + e.getMessage(), e);
+        }
+
+        System.out.println("└────────────────────────────────────────────────────────────┘");
+    }
+
+    public void showMemoryVisualization() throws FileSystemException {
+        try {
+            System.out.println("💾 Memory Visualization");
+            System.out.println("══════════════════════════════════════════════════════════");
+
+            int totalInodes = superBlock.getInodeCount();
+            int usedInodes = blockAllocator.getUsedInodeCount();
+
+            int totalDataBlocks = superBlock.getDataBlockCount();
+            int usedDataBlocks = blockAllocator.getUsedDataBlockCount();
+
+            // DEBUG: Tambahkan informasi debug
+            System.out.println("🔍 INFO:");
+            System.out.println("   Total Data Blocks Available: " + totalDataBlocks);
+            System.out.println("   Used Data Blocks (from bitmap): " + usedDataBlocks);
+
+            // PERBAIKAN: Hitung actual file data blocks dengan cara manual
+            int actualFileDataBlocks = calculateTotalFileDataBlocks();
+            System.out.println("   Actual File Data Blocks: " + actualFileDataBlocks);
+            System.out.println();
+
+            // Tampilkan inode usage
+            System.out.println("📦 Inode Usage:");
+            System.out.print("   ");
+            drawProgressBar(usedInodes, totalInodes, 40, "🟦", "⬜");
+            System.out.printf(" %d/%d (%.1f%%)%n", usedInodes, totalInodes,
+                (double)usedInodes/totalInodes*100);
+
+            // Tampilkan data block usage (dari bitmap)
+            System.out.println("💿 Data Block Usage (Total Allocated):");
+            System.out.print("   ");
+            drawProgressBar(usedDataBlocks, totalDataBlocks, 40, "🟩", "⬜");
+            System.out.printf(" %d/%d (%.1f%%)%n", usedDataBlocks, totalDataBlocks,
+                (double)usedDataBlocks/totalDataBlocks*100);
+
+            // PERBAIKAN: Gunakan actualFileDataBlocks untuk "Data Only"
+            System.out.println("🗄️  File Data Usage (Content Only):");
+            System.out.print("   ");
+            drawProgressBar(actualFileDataBlocks, totalDataBlocks, 40, "🟨", "⬜");
+            System.out.printf(" %s/%s (%.1f%%)%n",
+                formatFileSize((long)actualFileDataBlocks * superBlock.getBlockSize()),
+                formatFileSize((long)totalDataBlocks * superBlock.getBlockSize()),
+                (double)actualFileDataBlocks/totalDataBlocks*100);
+
+            // Total system usage
+            long totalAllocatedStorage = (long)superBlock.getTotalBlockCount() * superBlock.getBlockSize();
+            long usedDataStorage = (long)usedDataBlocks * superBlock.getBlockSize();
+            long usedInodeStorage = (long)usedInodes * 64; // 64 bytes per inode
+            long usedMetadataStorage = superBlock.getBlockSize(); // SuperBlock
+            usedMetadataStorage += superBlock.getInodeBitmapSize(); // Inode bitmap
+            usedMetadataStorage += superBlock.getDataBlockBitmapSize(); // Data bitmap
+
+            long totalUsedStorage = usedDataStorage + usedInodeStorage + usedMetadataStorage;
+
+            System.out.println("🗄️  Total System Usage:");
+            System.out.print("   ");
+            drawProgressBar((int)(totalUsedStorage/512), (int)(totalAllocatedStorage/512), 40, "🟪", "⬜");
+            System.out.printf(" %s/%s (%.1f%%)%n",
+                formatFileSize(totalUsedStorage), formatFileSize(totalAllocatedStorage),
+                (double)totalUsedStorage/totalAllocatedStorage*100);
+
+            System.out.println("══════════════════════════════════════════════════════════");
+            System.out.println("📊 Detailed Statistics:");
+            System.out.printf("   Block Size: %s%n", formatFileSize(superBlock.getBlockSize()));
+            System.out.printf("   Free Inodes: %d%n", totalInodes - usedInodes);
+            System.out.printf("   Free Data Blocks: %d%n", totalDataBlocks - usedDataBlocks);
+            System.out.printf("   Free Data Space: %s%n", formatFileSize((long)(totalDataBlocks - usedDataBlocks) * superBlock.getBlockSize()));
+            System.out.printf("   Actual File Content: %s%n", formatFileSize(calculateNodeContentSize(tree.root)));
+            System.out.printf("   Storage Efficiency: %.2f%% (content/allocated)%n",
+                (double)calculateNodeContentSize(tree.root) / (actualFileDataBlocks * superBlock.getBlockSize()) * 100);
+
+        } catch (Exception e) {
+            throw new FileSystemException("Error generating memory visualization: " + e.getMessage(), e);
+        }
+    }
+
+    // Method yang benar untuk menghitung content size dalam bytes
+    private long calculateTotalFileContentSizeInBytes() throws FileSystemException {
+        return calculateNodeContentSize(tree.root);
+    }
+
+    private long calculateNodeContentSize(DirectoryTree.Node node) throws FileSystemException {
+        long totalSize = 0;
+        
+        if (node.type == FileType.FILE) {
+            try {
+                IndexNode inode = inodeManager.readNode(node.inodeNumber);
+                totalSize += inode.getSize(); // Size file dalam bytes
+            } catch (IOException e) {
+                // Skip jika error
+            }
+        } else if (node.childNodes != null) {
+            Object[] children = node.childNodes.toArray();
+            for (Object childObj : children) {
+                DirectoryTree.Node child = (DirectoryTree.Node) childObj;
+                totalSize += calculateNodeContentSize(child);
+            }
+        }
+        
+        return totalSize;
+    }
+
+    // Method ini untuk menghitung DATA BLOCKS yang digunakan file
+    private int calculateTotalFileDataBlocks() throws FileSystemException {
+        return calculateNodeDataBlocks(tree.root);
+    }
+
+    private int calculateNodeDataBlocks(DirectoryTree.Node node) throws FileSystemException {
+        int totalBlocks = 0;
+
+        if (node.type == FileType.FILE) {
+            try {
+                IndexNode inode = inodeManager.readNode(node.inodeNumber);
+                totalBlocks += inode.getAllocatedDirectBlocks().length; // Jumlah blok yang dialokasikan untuk file ini
+            } catch (IOException e) {
+                // Skip jika error
+            }
+        } else if (node.childNodes != null) {
+            Object[] children = node.childNodes.toArray();
+            for (Object childObj : children) {
+                DirectoryTree.Node child = (DirectoryTree.Node) childObj;
+                totalBlocks += calculateNodeDataBlocks(child);
+            }
+        }
+
+        return totalBlocks;
+    }
+
+    private void drawProgressBar(int used, int total, int width, String usedChar, String freeChar) {
+        int usedWidth = (int)((double)used / total * width);
+        int freeWidth = width - usedWidth;
+
+        System.out.print("[");
+        for (int i = 0; i < usedWidth; i++) {
+            System.out.print(usedChar);
+        }
+        for (int i = 0; i < freeWidth; i++) {
+            System.out.print(freeChar);
+        }
+        System.out.print("]");
+    }
+
+    private String getColoredName(String name, FileType type) {
+        // ANSI color codes for different file types
+        if (type == FileType.DIRECTORY) {
+            return "\033[34m" + name + "\033[0m"; // Blue for directories
+        } else {
+            // Color based on file extension
+            if (name.endsWith(".txt") || name.endsWith(".md")) {
+                return "\033[37m" + name + "\033[0m"; // White for text files
+            } else if (name.endsWith(".jpg") || name.endsWith(".png") || name.endsWith(".gif")) {
+                return "\033[35m" + name + "\033[0m"; // Magenta for images
+            } else if (name.endsWith(".java") || name.endsWith(".py") || name.endsWith(".js")) {
+                return "\033[32m" + name + "\033[0m"; // Green for code files
+            } else if (name.endsWith(".exe") || name.endsWith(".bin")) {
+                return "\033[31m" + name + "\033[0m"; // Red for executables
+            } else {
+                return "\033[33m" + name + "\033[0m"; // Yellow for other files
+            }
+        }
+    }
+
+    private String formatFileSize(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        else if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+        else if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024));
+        else return String.format("%.1f GB", bytes / (1024.0 * 1024 * 1024));
+    }
+
+    private long calculateDirectorySize(DirectoryTree.Node dirNode) throws IOException {
+        long totalSize = 0;
+        if (dirNode.childNodes != null) {
+            Object[] children = dirNode.childNodes.toArray();
+            for (Object childObj : children) {
+                DirectoryTree.Node childNode = (DirectoryTree.Node) childObj;
+                IndexNode childInode = inodeManager.readNode(childNode.inodeNumber);
+
+                if (childNode.type == FileType.DIRECTORY) {
+                    totalSize += calculateDirectorySize(childNode);
+                } else {
+                    totalSize += childInode.getSize();
+                }
+            }
+        }
+        return totalSize;
+    }
+
+    public void showFileSystemTree() {
+        System.out.println("🌳 File System Tree:");
+        System.out.println("════════════════════");
+        printTreeNode(tree.root, "", true);
+        System.out.println();
+    }
+
+    private void printTreeNode(DirectoryTree.Node node, String prefix, boolean isLast) {
+        String connector = isLast ? "└── " : "├── ";
+        String icon = node.type == FileType.DIRECTORY ? "📁" : "📄";
+
+        try {
+            IndexNode nodeInode = inodeManager.readNode(node.inodeNumber);
+            String sizeInfo = node.type == FileType.DIRECTORY ?
+                "" : " (" + formatFileSize(nodeInode.getSize()) + ")";
+
+            System.out.println(prefix + connector + icon + " " + node.name + sizeInfo);
+
+            if (node.type == FileType.DIRECTORY && node.childNodes != null) {
+                Object[] children = node.childNodes.toArray();
+                for (int i = 0; i < children.length; i++) {
+                    DirectoryTree.Node child = (DirectoryTree.Node) children[i];
+                    boolean isLastChild = (i == children.length - 1);
+                    String newPrefix = prefix + (isLast ? "    " : "│   ");
+                    printTreeNode(child, newPrefix, isLastChild);
+                }
+            }
+        } catch (IOException e) {
+            System.out.println(prefix + connector + "❌ " + node.name + " (Error reading)");
+        }
+    }
+
+// ...existing code...
 }
