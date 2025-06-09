@@ -1,27 +1,26 @@
-## Simulator Sistem Manajemen File Unix Sederhana (dengan JAVA GUI Swing)
+# Simulator Sistem Manajemen File Unix Sederhana (dengan JAVA GUI Swing)
 
-### Daftar Isi
+## Deskripsi
 
-- Gambaran Umum
-- Fitur
-- Panduan Instalasi & Menjalankan
-- Cara Kerja
-- Daftar Perintah (via GUI)
-- Rencana Pengembangan Selanjutnya
-- Kontribusi
+File System Simulator SISOP6 adalah aplikasi simulasi sistem file bertipe Unix yang dikembangkan menggunakan Java. Aplikasi ini menyediakan antarmuka grafis (GUI) berbasis Java Swing untuk memudahkan pengguna dalam melakukan berbagai operasi sistem file virtual di dalam satu file kontainer biner. Simulator ini cocok digunakan sebagai sarana pembelajaran konsep dasar sistem file, struktur data sistem file, dan implementasi operasi file pada lingkungan terisolasi.
 
 ---
 
-## Gambaran Umum
+## Struktur Folder dan File
 
-Simulator ini adalah aplikasi sistem file bergaya Unix yang ditulis dalam Java 17. Awalnya berbasis CLI, kini telah dikembangkan dengan antarmuka grafis (GUI) menggunakan Java Swing agar lebih interaktif dan mudah digunakan. Simulator ini mengimplementasikan struktur data utama yang biasa ditemukan pada sistem file nyata, seperti:
+- **src/main/java/**  
+  Berisi kode sumber aplikasi, terdiri dari beberapa package utama:
+  - **filesystem/**: Implementasi logika sistem file (SuperBlock, Bitmap, Inode, DataBlock, FileSystem, dsb).
+  - **gui/**: Komponen antarmuka pengguna berbasis Swing (MainFrame, panel, dialog, dsb).
+  - **command/**: Implementasi perintah-perintah sistem file (mkdir, ls, cd, cp, rm, cat, write, import, export, dsb).
+  - **util/**: Kelas utilitas untuk berbagai kebutuhan umum.
+  - **Main.java**: Entry point aplikasi.
 
-- **Super Block** (metadata utama sistem file)
-- **Bitmap** (manajemen blok)
-- **Index Node (inode)** (metadata file/direktori)
-- **Blok Data** (penyimpanan konten file)
+- **src/main/resources/**  
+  Berisi resource pendukung aplikasi (ikon, file konfigurasi, dsb).
 
-Seluruh sistem file disimpan dalam satu file biner yang berperan sebagai "disk virtual" atau kontainer.
+- **pom.xml**  
+  File konfigurasi Maven untuk manajemen dependensi dan build project.
 
 ---
 
@@ -103,6 +102,28 @@ Seluruh sistem file disimpan dalam satu file biner yang berperan sebagai "disk v
 - **Inode**: Metadata file/direktori (tipe, ukuran, nama, pointer ke blok data; hingga 56 blok data per file, maksimal ~28KB/file)
 - **Blok Data**: Menyimpan konten file
 - **Segmentasi Disk**: File kontainer dibagi region: Super Block, Bitmap Inode, Bitmap Data, Inode, Data Block.
+
+---
+
+## Panduan Penggunaan Fitur
+
+- **Navigasi Direktori**:  
+  Gunakan tree view atau tombol `cd` untuk berpindah direktori.
+
+- **Detailed List**:  
+  Klik panel/tombol "Detailed List" untuk melihat daftar isi direktori aktif beserta detail atribut file/direktori.
+
+- **Dir Info**:  
+  Klik panel/tombol "Dir Info" untuk melihat informasi metadata direktori aktif.
+
+- **Operasi File/Direktori**:  
+  Gunakan tombol perintah seperti `mkdir`, `rmdir`, `cp`, `rm`, `cat`, `write` untuk melakukan operasi file/direktori.
+
+- **Impor/Ekspor File**:  
+  Gunakan fitur import/export untuk memindahkan file antara simulator dan sistem file host.
+
+- **Log Output**:  
+  Selalu cek area log untuk mengetahui hasil setiap operasi.
 
 ---
 
