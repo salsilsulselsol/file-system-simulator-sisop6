@@ -2,7 +2,6 @@ package filesystemsimulator.filestructures.container;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.util.Arrays; // Untuk Arrays.equals
 
 import filesystemsimulator.exceptions.FileSystemException;
 import filesystemsimulator.filestructures.data.FileType;

@@ -2,7 +2,6 @@ package filesystemsimulator.filesystem.core;
 
 import filesystemsimulator.filestructures.container.IndexNode;
 import filesystemsimulator.filestructures.container.SuperBlock;
-import filesystemsimulator.exceptions.FileSystemException; // Jika diperlukan
 
 import java.io.IOException;
 import java.io.RandomAccessFile;

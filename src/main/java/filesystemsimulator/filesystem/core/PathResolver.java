@@ -1,6 +1,5 @@
 package filesystemsimulator.filesystem.core;
 
-import filesystemsimulator.datastructures.LinkedList; // Jika diperlukan untuk iterasi child
 import filesystemsimulator.exceptions.FileSystemException;
 import filesystemsimulator.filestructures.data.DirectoryTree;
 import filesystemsimulator.filestructures.data.FileType;

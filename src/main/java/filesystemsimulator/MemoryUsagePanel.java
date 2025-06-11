@@ -43,7 +43,6 @@ public class MemoryUsagePanel extends JPanel {
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
         int y = 20;
-        int barHeight = 30;
         int spacing = 60; // Increased spacing for labels
 
         y = drawUsageBar(g2d, y, "📦 Inode Usage", INODE_COLOR, usedInodes, totalInodes, " inodes") + spacing;
@@ -86,7 +85,6 @@ public class MemoryUsagePanel extends JPanel {
         g.setFont(PERCENT_FONT);
         g.setColor(Color.WHITE);
         FontMetrics fm = g.getFontMetrics();
-        int percentWidth = fm.stringWidth(percentText);
         // Draw with a shadow for readability
         g.setColor(Color.BLACK.darker());
         g.drawString(percentText, x_margin + 11, barY + fm.getAscent() + 6);
